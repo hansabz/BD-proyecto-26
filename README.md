@@ -52,7 +52,7 @@ Requisitos (Windows):
 | ODBC Driver for SQL Server | 17 o 18 | viene con SSMS; si no, se baja de Microsoft |
 
 ```powershell
-git clone https://github.com/25000476-rgb/BD-proyect-2026.git
+git clone https://github.com/hansabz/BD-proyect-2026.git
 cd BD-proyect-2026
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
