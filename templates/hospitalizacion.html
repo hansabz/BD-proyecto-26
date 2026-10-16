@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{#
+  hospitalizacion.html — RF3: Control de hospitalización (ruta /hospitalizacion).
+  • Mapa de camas por sala (verde = disponible, rojo = ocupada + nivel de riesgo)
+  • Lista de pacientes admitidos que esperan cama
+  • Diálogo para internar: el servidor rechaza las camas ocupadas
+  • Tabla de la Figura 3 con fecha de ingreso/salida reales y nivel de riesgo
+#}
+{% block titulo %}Hospitalización{% endblock %}
+{% block etiqueta %}<span class="etiqueta-rf">RF3 · Hospitalización y camas</span>{% endblock %}
+{% block encabezado %}Control de hospitalización{% endblock %}
+{% block bajada %}El sistema impide asignar una cama ocupada (bloqueo transaccional + índice único en SQL Server) y registra solo la fecha y hora reales de ingreso y salida de la sala.{% endblock %}
+
+{% block contenido %}
+<div class="kpis" id="kpis"></div>
+
+<div class="rejilla-2">
+  <section class="panel">
+    <div class="panel-cab">
+      <div><h2>Mapa de camas</h2><span class="sub">Clic en una cama para internar o dar alta</span></div>
+      <span class="espacio"></span>
+      <div class="leyenda">
+        <span><i style="background:#cfe6da"></i>Disponible</span>
+        <span><i style="background:var(--alert)"></i>Ocupada</span>
+      </div>
+    </div>
+    <div class="panel-cuerpo mapa" id="mapa"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-cab">
+      <div><h2>En espera de cama</h2><span class="sub">Pacientes admitidos sin cama asignada</span></div>
+      <span class="espacio"></span>
+      <button type="button" class="btn btn-primario" id="btn-asignar">Asignar cama</button>
+    </div>
+    <div class="panel-cuerpo"><ul class="lista" id="pendientes"></ul></div>
+  </section>
+</div>
+
+{% set titulo_panel = "Registro de asignación de camas (Figura 3)" %}
+{% set boton_nuevo = None %}
+{% include "_panel_datos.html" %}
+
+<dialog id="dlg-asignar">
+  <form id="form-asignar" novalidate>
+    <div class="dlg-cab">
+      <div><h2>Asignar cama</h2><p>La fecha y hora de ingreso a sala se registran automáticamente al confirmar.</p></div>
+      <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button>
+    </div>
+    <div class="dlg-cuerpo">
+      <div class="form-grid">
+        <div class="campo c6"><label for="a-ingreso">Ingreso / paciente</label><select id="a-ingreso" name="numeroIngreso"></select></div>
+        <div class="campo c3"><label for="a-sala">Sala</label><select id="a-sala" name="codigoSala"></select></div>
+        <div class="campo c3"><label for="a-cama">Cama</label><select id="a-cama" name="numeroCama"></select>
+          <span class="ayuda">Las ocupadas se listan a propósito: el servidor rechaza la asignación.</span></div>
+      </div>
+    </div>
+    <div class="dlg-pie">
+      <span class="error-general"></span>
+      <button type="button" class="btn" data-cerrar>Cancelar</button>
+      <button type="submit" class="btn btn-primario">Internar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-cama" class="angosto">
+  <div class="dlg-cab"><div><h2 id="cama-titulo"></h2><p id="cama-sub"></p></div>
+    <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button></div>
+  <div class="dlg-cuerpo" id="cama-cuerpo"></div>
+  <div class="dlg-pie" id="cama-pie"></div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Configuración del área que arma Flask (columnas, filtros, gráficas) -> la usa PanelDatos.
+window.AREA_CONFIG = {{ config_area | tojson }};
+
+let camas = [], pendientes = [];
+
+// Dibuja el mapa de camas agrupado por sala y la lista de pacientes en espera.
+async function cargarMapa() {
+  const d = await API.get("/api/hospitalizacion/camas");
+  camas = d.camas; pendientes = d.pendientes;
+  const porSala = {};
+  for (const c of camas) (porSala[c.codigoSala] ??= { nombre: c.sala, camas: [] }).camas.push(c);
+  $("#mapa").innerHTML = Object.entries(porSala).map(([cod, s]) => {
+    const libres = s.camas.filter((c) => !c.ocupada).length;
+    return `<div class="mapa-sala"><h3>${esc(s.nombre)} <small>${libres} libre(s) de ${s.camas.length}</small></h3>
+      <div class="camas">${s.camas.map((c) => `
+        <button type="button" class="cama ${c.ocupada ? "ocupada" : "libre"}" data-sala="${c.codigoSala}" data-cama="${c.numeroCama}"
+                title="${esc(c.estado)}${c.paciente ? " · " + esc(c.paciente) : ""}">
+          <span class="num">${esc(c.numeroCama)}</span>
+          <span class="quien">${c.paciente ? esc(c.paciente) : esc(c.estado)}</span>
+          ${c.ocupada && c.nivelRiesgo ? `<span class="riesgo-cama ${c.nivelRiesgo === "Crítico" ? "critico" : c.nivelRiesgo === "Moderado" ? "moderado" : ""}">${esc(c.nivelRiesgo)}</span>` : ""}
+        </button>`).join("")}</div></div>`;
+  }).join("");
+  $("#pendientes").innerHTML = pendientes.map((p) => `
+    <li><span class="pulsera P">${esc(p.numeroPaciente)}</span>
+      <span class="grow"><b>${esc(p.paciente)}</b><small>${esc(p.numeroIngreso)} · ${p.edad} años · admitido ${fmt.fecha(p.fechaReg)}</small></span>
+      <button type="button" class="btn btn-mini" data-ingreso="${esc(p.numeroIngreso)}">Asignar</button></li>`).join("")
+    || `<li class="vacio" style="justify-content:center">Nadie en espera. Las admisiones nuevas aparecen acá.</li>`;
+  $("#btn-asignar").disabled = !pendientes.length;
+}
+
+// Opciones de cama de una sala. Las ocupadas se listan A PROPÓSITO para poder demostrar
+// que el servidor rechaza la asignación (regla de RF3).
+function llenarCamas(sala, preferida) {
+  const lista = camas.filter((c) => c.codigoSala === sala)
+    .sort((a, b) => a.ocupada - b.ocupada);   // libres primero
+  opciones($("#a-cama"), lista, {
+    vacio: null, valor: (c) => c.numeroCama,
+    texto: (c) => `${c.numeroCama} — ${c.ocupada ? `ocupada (${c.numeroPaciente})` : "disponible"}`,
+  });
+  if (preferida) $("#a-cama").value = preferida;
+}
+
+// Abre el diálogo para internar (puede venir con ingreso/sala/cama ya elegidos).
+function abrirAsignar({ ingreso, sala, cama } = {}) {
+  if (!pendientes.length) return toast("No hay pacientes esperando cama.", "error");
+  const form = $("#form-asignar");
+  form.reset();
+  opciones($("#a-ingreso"), pendientes, { vacio: null, valor: (p) => p.numeroIngreso,
+    texto: (p) => `${p.numeroIngreso} · ${p.numeroPaciente} — ${p.paciente}` });
+  const salas = [...new Map(camas.map((c) => [c.codigoSala, { id: c.codigoSala, nombre: c.sala }])).values()];
+  opciones($("#a-sala"), salas, { vacio: null });
+  if (ingreso) $("#a-ingreso").value = ingreso;
+  if (sala) $("#a-sala").value = sala;
+  llenarCamas($("#a-sala").value, cama);
+  abrirDialogo("dlg-asignar");
+}
+$("#a-sala").addEventListener("change", (e) => llenarCamas(e.target.value));
+$("#btn-asignar").addEventListener("click", () => abrirAsignar());
+$("#pendientes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ingreso]");
+  if (b) abrirAsignar({ ingreso: b.dataset.ingreso });
+});
+
+$("#form-asignar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await Form.enviar(e.target, (d) => API.post("/api/hospitalizacion/asignar", d));
+  if (r) { $("#dlg-asignar").close(); refrescar(); }
+});
+
+// Alta médica: el servidor guarda la fecha de salida real y libera la cama.
+async function darAlta(ingreso, boton) {
+  const r = await conBoton(boton, () => API.post(`/api/hospitalizacion/ingreso/${ingreso}/alta`));
+  if (r) { toast(r.mensaje); $("#dlg-cama").close(); refrescar(); }
+}
+
+// Clic en una cama: ocupada -> datos del paciente y botón de alta; libre -> internar ahí.
+$("#mapa").addEventListener("click", (e) => {
+  const b = e.target.closest(".cama");
+  if (!b) return;
+  const c = camas.find((x) => x.codigoSala === b.dataset.sala && x.numeroCama === b.dataset.cama);
+  $("#cama-titulo").textContent = `Cama ${c.numeroCama}`;
+  $("#cama-sub").textContent = `${c.sala} · ${c.estado}`;
+  const pie = $("#cama-pie");
+  if (c.ocupada) {
+    $("#cama-cuerpo").innerHTML = `<ul class="lista"><li>${pulsera(c.numeroPaciente)}<span class="grow"><b>${esc(c.paciente)}</b>
+      <small>Ingreso ${esc(c.numeroIngreso)} · en sala desde ${fmt.fechahora(c.fechaIngreso)}</small></span>
+      ${celda({ campo: "nivelRiesgo", tipo: "riesgo" }, c)}</li></ul>
+      <p style="margin:10px 0 0;font-size:12px;color:var(--muted)">El nivel de riesgo lo calcula PySpark con los logs de los sensores (página Telemetría).</p>`;
+    pie.innerHTML = `<button type="button" class="btn" data-cerrar>Cerrar</button>
+      <button type="button" class="btn btn-primario" id="btn-alta">Dar alta médica</button>`;
+    $("#btn-alta").onclick = (ev) => darAlta(c.numeroIngreso, ev.currentTarget);
+  } else {
+    // Cama disponible: solo se puede internar a alguien que esté esperando.
+    $("#cama-cuerpo").innerHTML = `<p style="margin:0;color:var(--ink-2)">Disponible. ${pendientes.length
+      ? `Hay ${pendientes.length} paciente(s) esperando cama.` : "No hay pacientes esperando."}</p>`;
+    pie.innerHTML = `<button type="button" class="btn" data-cerrar>Cerrar</button>
+      ${pendientes.length ? `<button type="button" class="btn btn-primario" id="btn-internar">Internar aquí</button>` : ""}`;
+    $("#btn-internar")?.addEventListener("click", () => {
+      $("#dlg-cama").close();
+      abrirAsignar({ sala: c.codigoSala, cama: c.numeroCama });
+    });
+  }
+  $("#dlg-cama").showModal();
+});
+
+// Tabla en vivo (Figura 3). Cada vez que cambia algo en la base se recarga también el mapa.
+const panel = new PanelDatos(window.AREA_CONFIG, {
+  acciones: (r) => r.estado === "Internado"
+    ? [{ texto: "Dar alta", fn: (r, b) => darAlta(r.numeroIngreso, b) }]
+    : [],
+  alActualizar: () => cargarMapa(),
+});
+
+function refrescar() { panel.cargar(); }
+</script>
+{% endblock %}

@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{#
+  pacientes.html — RF2: Admisión y control de pacientes (ruta /pacientes).
+  • Formulario de admisión (Figura 2): datos demográficos, familiar responsable y
+    médico externo que refiere. Sirve también para editar y para reingresos.
+  • Expediente (clic en una fila): ficha estilo Figura 2, historial de ingresos e
+    informe de citas (Query 2, procedimiento SP_HistorialCitas) + agendar cita.
+#}
+{% block titulo %}Admisión de pacientes{% endblock %}
+{% block etiqueta %}<span class="etiqueta-rf">RF2 · Admisión y control</span>{% endblock %}
+{% block encabezado %}Admisión y control de pacientes{% endblock %}
+{% block bajada %}Ficha de ingreso con datos demográficos, el familiar responsable del adulto mayor y el médico externo que lo refiere. Hacé clic en un paciente para ver su expediente y el historial consolidado de citas.{% endblock %}
+
+{% block contenido %}
+<div class="kpis" id="kpis"></div>
+
+{% set titulo_panel = "Expedientes de pacientes" %}
+{% set boton_nuevo = "Admitir paciente" %}
+{% include "_panel_datos.html" %}
+
+<!-- Formulario de admisión (Figura 2) -->
+<dialog id="dlg-admision" class="ancho">
+  <form id="form-admision" novalidate>
+    <input type="hidden" name="numeroPaciente">
+    <div class="dlg-cab">
+      <div><h2 id="titulo-admision">Ficha de ingreso y admisión</h2>
+        <p id="sub-admision">Figura 2 · la fecha y hora de registro las pone el servidor al guardar.</p></div>
+      <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button>
+    </div>
+    <div class="dlg-cuerpo">
+      <div class="form-grid">
+        <div class="c6 id-previo" id="id-previo-pac">No. de paciente: se asigna automáticamente (<span class="pulsera P">PAC-####</span>, generado en PySpark).</div>
+
+        <div class="seccion-form">Datos demográficos</div>
+        <div class="campo c3"><label for="p-nombres">Nombres *</label><input id="p-nombres" name="nombres" maxlength="25" autocomplete="off"></div>
+        <div class="campo c3"><label for="p-apellidos">Apellidos *</label><input id="p-apellidos" name="apellidos" maxlength="25" autocomplete="off"></div>
+        <div class="campo c2"><label for="p-nac">Fecha de nacimiento *</label><input type="date" id="p-nac" name="fechaNac">
+          <span class="ayuda" id="p-edad"></span></div>
+        <div class="campo c2"><span class="rotulo">Sexo *</span>
+          <div class="seg" style="width:fit-content">
+            <label><input type="radio" name="sexo" value="F"><span>Femenino</span></label>
+            <label><input type="radio" name="sexo" value="M"><span>Masculino</span></label>
+          </div></div>
+        <div class="campo c2"><label for="p-tel">Teléfono</label><input type="tel" id="p-tel" name="telefono" maxlength="20" placeholder="+502 5555-1234"></div>
+        <div class="campo c6"><label for="p-dir">Dirección</label><input id="p-dir" name="direccion" maxlength="50" placeholder="14 Avenida 5-22 Zona 10, Ciudad"></div>
+
+        <div class="seccion-form">Familiar responsable / emergencia</div>
+        <div class="campo c3"><label for="p-fam">Nombre del familiar *</label><input id="p-fam" name="nombreFam" maxlength="40" autocomplete="off"></div>
+        <div class="campo c1 c2" style="grid-column:span 1"><label for="p-par">Parentesco *</label><select id="p-par" name="parentescoFam"></select></div>
+        <div class="campo c2"><label for="p-telfam">Teléfono del familiar *</label><input type="tel" id="p-telfam" name="telefonoFam" maxlength="20" placeholder="+502 4444-9876"></div>
+
+        <div class="seccion-form">Médico externo que refiere</div>
+        <div class="campo c3"><label for="p-med">Médico que refiere *</label><input id="p-med" name="medicoRef" maxlength="30" placeholder="Dr. Fernando Asturias"></div>
+        <div class="campo c3"><label for="p-cli">Clínica *</label><input id="p-cli" name="clinicaRef" maxlength="35" list="lista-clinicas" placeholder="Clínica Santa María">
+          <datalist id="lista-clinicas"></datalist></div>
+      </div>
+    </div>
+    <div class="dlg-pie">
+      <span class="error-general"></span>
+      <button type="button" class="btn" data-cerrar>Cancelar</button>
+      <button type="submit" class="btn btn-primario" id="btn-guardar-pac">Registrar ingreso</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Expediente: ficha + ingresos + historial de citas (Query 2) -->
+<dialog id="dlg-expediente" class="ancho">
+  <div class="dlg-cab">
+    <div><h2 id="exp-titulo"></h2><p id="exp-sub"></p></div>
+    <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button>
+  </div>
+  <div class="dlg-cuerpo">
+    <div id="exp-ficha"></div>
+    <h3 style="font:600 15px var(--font-display);margin:22px 0 8px">Historial de ingresos</h3>
+    <div class="tabla-wrap" style="max-height:none;border:1px solid var(--line-2);border-radius:10px">
+      <table class="datos"><thead><tr><th>No. Ingreso</th><th>Registro</th><th>Referido por</th><th>Sala / Cama</th><th>Ingreso a sala</th><th>Salida</th><th>Estado</th></tr></thead>
+        <tbody id="exp-ingresos"></tbody></table>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:10px;margin:22px 0 8px">
+      <h3 style="font:600 15px var(--font-display);margin:0">Informe de citas consolidado</h3>
+      <small style="color:var(--muted)">Query 2 · <span class="mono">EXEC SP_HistorialCitas @ID_Paciente</span> (Figura 4)</small>
+    </div>
+    <div class="tabla-wrap" style="max-height:none;border:1px solid var(--line-2);border-radius:10px">
+      <table class="datos"><thead><tr><th>No. Cita</th><th>Fecha</th><th>Hora</th><th>Consultor</th><th>Puesto / Esp.</th><th>Sala asignada</th></tr></thead>
+        <tbody id="exp-citas"></tbody></table>
+    </div>
+    <form id="form-cita" class="form-grid" style="margin-top:14px;padding:14px;border:1px dashed var(--line);border-radius:12px" novalidate>
+      <div class="seccion-form">Agendar cita</div>
+      <div class="campo c2"><label for="c-med">Médico</label><select id="c-med" name="numeroEmpleado"></select></div>
+      <div class="campo c2"><label for="c-sala">Sala</label><select id="c-sala" name="codigoSala"></select></div>
+      <div class="campo" style="grid-column:span 1"><label for="c-fecha">Fecha</label><input type="date" id="c-fecha" name="fecha"></div>
+      <div class="campo" style="grid-column:span 1"><label for="c-hora">Hora</label><input type="time" id="c-hora" name="hora" step="1800"></div>
+      <div class="c6" style="display:flex;justify-content:flex-end;gap:8px;align-items:center">
+        <span class="error-general" style="margin-right:auto;color:var(--alert);font-weight:600;font-size:12.5px"></span>
+        <button type="submit" class="btn btn-primario">Agendar</button></div>
+    </form>
+  </div>
+  <div class="dlg-pie">
+    <button type="button" class="btn" id="exp-editar">Editar datos</button>
+    <button type="button" class="btn btn-primario" id="exp-reingreso">Registrar reingreso</button>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Configuración del área que arma Flask (columnas, filtros, gráficas) -> la usa PanelDatos.
+window.AREA_CONFIG = {{ config_area | tojson }};
+
+const formAdm = $("#form-admision");
+let catalogos = null;
+// El mismo formulario sirve para tres cosas: paciente nuevo, editar o reingreso.
+let modo = "nuevo";          // nuevo | editar | reingreso
+let actual = null;           // registro del paciente abierto
+
+async function cargarCatalogos() {
+  catalogos = await API.get("/api/pacientes/catalogos");
+  opciones($("#p-par"), catalogos.parentescos.map((p) => ({ id: p, nombre: p })));
+  $("#lista-clinicas").innerHTML = catalogos.clinicas.map((c) => `<option value="${esc(c)}">`).join("");
+  opciones($("#c-med"), catalogos.medicos, { texto: (m) => `${m.nombre} · ${m.especialidad}` });
+  opciones($("#c-sala"), catalogos.salas);
+}
+
+$("#c-med").addEventListener("change", (e) => {
+  const m = catalogos.medicos.find((x) => x.id === e.target.value);
+  if (m) $("#c-sala").value = m.sala;
+});
+
+// Muestra la edad mientras se elige la fecha de nacimiento.
+$("#p-nac").addEventListener("input", (e) => {
+  const v = e.target.value;
+  if (!v) return ($("#p-edad").textContent = "");
+  const nac = new Date(v + "T00:00"), hoy = new Date();
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  if (hoy < new Date(hoy.getFullYear(), nac.getMonth(), nac.getDate())) edad--;
+  $("#p-edad").textContent = `${edad} años${edad >= 65 ? " · adulto mayor" : ""}`;
+});
+
+// Abre el formulario de la Figura 2 en modo nuevo / editar / reingreso.
+function abrirAdmision(tipo, r = null) {
+  modo = tipo;
+  formAdm.reset();
+  $("#p-edad").textContent = "";
+  if (r) {
+    Form.llenar(formAdm, r);
+    $("#p-nac").dispatchEvent(new Event("input"));
+  }
+  const textos = {
+    nuevo: ["Ficha de ingreso y admisión", "Figura 2 · la fecha y hora de registro las pone el servidor al guardar.", "Registrar ingreso",
+            `No. de paciente: se asigna automáticamente (<span class="pulsera P">PAC-####</span>, generado en PySpark).`],
+    reingreso: [`Reingreso de ${r?.numeroPaciente}`, "Se crea un nuevo registro de ingreso con la fecha y hora actuales.", "Registrar reingreso",
+                `Paciente existente ${pulsera(r?.numeroPaciente)} · el número de ingreso (ING-###) se genera al guardar.`],
+    editar: [`Editar expediente ${r?.numeroPaciente}`, "Los datos del familiar y del médico se actualizan en el último ingreso.", "Guardar cambios",
+             `Expediente ${pulsera(r?.numeroPaciente)}`],
+  }[tipo];
+  $("#titulo-admision").textContent = textos[0];
+  $("#sub-admision").textContent = textos[1];
+  $("#btn-guardar-pac").textContent = textos[2];
+  $("#id-previo-pac").innerHTML = textos[3];
+  if (tipo === "nuevo") formAdm.numeroPaciente.value = "";
+  abrirDialogo("dlg-admision");
+  $("#p-nombres").focus();
+}
+
+// Guardar: editar -> PUT; nuevo o reingreso -> POST (el servidor crea el ingreso con GETDATE()).
+formAdm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await Form.enviar(formAdm, (d) => modo === "editar"
+    ? API.put(`/api/pacientes/expediente/${d.numeroPaciente}`, d)
+    : API.post("/api/pacientes", d));
+  if (r) {
+    $("#dlg-admision").close();
+    panel.cargar();
+    if (modo !== "nuevo" && $("#dlg-expediente").open) abrirExpediente(actual.numeroPaciente);
+  }
+});
+
+// Expediente: ficha (Figura 2), ingresos y el historial de citas que devuelve la Query 2.
+async function abrirExpediente(numero) {
+  const d = await API.get(`/api/pacientes/expediente/${numero}`).catch((e) => toast(e.message, "error"));
+  if (!d) return;
+  const p = d.paciente;
+  actual = p;
+  $("#exp-titulo").innerHTML = `${esc(p.nombres)} ${esc(p.apellidos)} ${pulsera(p.numeroPaciente)}`;
+  $("#exp-sub").innerHTML = `${p.edad} años · <span class="badge ${TONOS_ESTADO[p.estado] || "gris"}">${esc(p.estado)}</span>`;
+  $("#exp-ficha").innerHTML = `
+    <div class="ficha">
+      <div class="ficha-titulo">Ficha de ingreso y admisión de paciente</div>
+      <div class="fila"><div><b>No. Paciente:</b> ${esc(p.numeroPaciente)}</div><div><b>Fecha registro:</b> ${fmt.fecha(p.fechaReg)}</div></div>
+      <div class="fila"><div><b>Nombre completo:</b> ${esc(p.nombres)} ${esc(p.apellidos)}</div></div>
+      <div class="fila"><div><b>Fecha nacimiento:</b> ${fmt.fecha(p.fechaNac)}</div><div><b>Teléfono:</b> ${esc(p.telefono || "—")}</div></div>
+      <div class="fila"><div><b>Dirección:</b> ${esc(p.direccion || "—")}</div></div>
+      <div class="fila"><div><b>Familiar responsable / emergencia:</b> ${p.nombreFam ? `${esc(p.nombreFam)} (${esc(p.parentescoFam)}) - Tel: ${esc(p.telefonoFam)}` : "—"}</div></div>
+      <div class="fila"><div><b>Médico que refiere:</b> ${p.medicoRef ? `${esc(p.medicoRef)} (${esc(p.clinicaRef)})` : "—"}</div></div>
+    </div>`;
+  $("#exp-ingresos").innerHTML = d.ingresos.map((i) => `<tr>
+      <td>${pulsera(i.numeroIngreso)}</td><td>${fmt.fecha(i.fechaReg)}</td>
+      <td>${esc(i.medicoRef)}<span class="extra">${esc(i.clinicaRef)}</span></td>
+      <td>${i.sala ? `${esc(i.sala)}<span class="extra mono">${esc(i.numeroCama)}</span>` : "—"}</td>
+      <td>${fmt.fechahora(i.fechaIngreso) ?? "—"}</td><td>${fmt.fechahora(i.fechaSalida) ?? "N/A"}</td>
+      <td><span class="badge ${TONOS_ESTADO[i.estado] || "gris"}">${esc(i.estado)}</span></td></tr>`).join("")
+    || `<tr><td colspan="7" class="vacio">Sin ingresos registrados.</td></tr>`;
+  const hoy = new Date().toISOString().slice(0, 10);
+  $("#exp-citas").innerHTML = d.citas.map((c) => `<tr style="${c.fecha >= hoy ? "" : "color:var(--muted)"}">
+      <td class="mono">${esc(c.numeroCita)}</td><td>${fmt.fecha(c.fecha)}</td><td class="mono">${esc(c.hora)}</td>
+      <td>${esc(c.consultor)}</td><td>${esc(c.puestoEspecialidad)}</td><td>${esc(c.sala)}</td></tr>`).join("")
+    || `<tr><td colspan="6" class="vacio">Sin citas registradas.</td></tr>`;
+  const activo = ["Internado", "En espera de cama"].includes(p.estado);
+  $("#exp-reingreso").disabled = activo;
+  $("#exp-reingreso").title = activo ? "Ya tiene un ingreso activo" : "";
+  $("#form-cita").reset();
+  Form.limpiarErrores($("#form-cita"));
+  if (!$("#dlg-expediente").open) $("#dlg-expediente").showModal();
+}
+
+$("#exp-editar").addEventListener("click", () => abrirAdmision("editar", actual));
+$("#exp-reingreso").addEventListener("click", () => abrirAdmision("reingreso", actual));
+$("#form-cita").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await Form.enviar(e.target, (d) => API.post(`/api/pacientes/expediente/${actual.numeroPaciente}/citas`, d));
+  if (r) { abrirExpediente(actual.numeroPaciente); panel.cargar(); }
+});
+
+// Tabla en vivo de pacientes. Clic en una fila -> expediente.
+const panel = new PanelDatos(window.AREA_CONFIG, {
+  alClic: (r) => abrirExpediente(r.numeroPaciente),
+  acciones: () => [
+    { texto: "Expediente", fn: (r) => abrirExpediente(r.numeroPaciente) },
+    { texto: "Editar", fn: (r) => abrirAdmision("editar", r) },
+  ],
+});
+$("#btn-nuevo").addEventListener("click", () => abrirAdmision("nuevo"));
+cargarCatalogos();
+</script>
+{% endblock %}

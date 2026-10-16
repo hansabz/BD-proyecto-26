@@ -1,0 +1,76 @@
+{#
+  base.html — Esqueleto común de TODAS las páginas.
+  Contiene: <head> (fuentes, CSS, ícono), la barra lateral con la navegación entre
+  áreas, la cabecera (título, bajada, reloj) y el contenedor de avisos (toasts).
+  Cada página "extiende" esta plantilla y completa los bloques:
+    titulo, etiqueta, encabezado, bajada, contenido y scripts.
+#}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Hospital W 2.0{% endblock %} · Hospital W</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f6e66'/><path d='M4 17h6l3-7 4 13 3-9 2 3h6' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <a class="marca" href="/">
+      <span class="marca-logo">W</span>
+      <span><b>Hospital W 2.0</b><small>Panel administrativo</small></span>
+    </a>
+    <svg class="ekg" viewBox="0 0 220 30" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 18 H52 l6 -2 l5 2 H80 l4 -14 l6 24 l5 -16 l3 6 H130 l6 -3 l6 3 H220"/>
+    </svg>
+    <nav class="nav" aria-label="Áreas">
+      <div class="nav-titulo">General</div>
+      <a href="/" class="{{ 'activo' if activo == 'inicio' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Panel general</a>
+      <div class="nav-titulo">Áreas</div>
+      <a href="/personal" class="{{ 'activo' if activo == 'personal' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M17 4.5v5M14.5 7h5"/></svg>
+        Personal <small>RF1</small></a>
+      <a href="/pacientes" class="{{ 'activo' if activo == 'pacientes' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3M9 11h6M12 8v6M9 17h6"/></svg>
+        Admisión <small>RF2</small></a>
+      <a href="/hospitalizacion" class="{{ 'activo' if activo == 'hospitalizacion' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6v13M3 14h18v5M21 14v-2a3 3 0 0 0-3-3h-7v5"/><circle cx="7" cy="11" r="2"/></svg>
+        Hospitalización <small>RF3</small></a>
+      <a href="/inventario" class="{{ 'activo' if activo == 'inventario' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+        Inventario <small>RF4</small></a>
+      <div class="nav-titulo">Big Data</div>
+      <a href="/telemetria" class="{{ 'activo' if activo == 'telemetria' }}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l2-6 4 13 3-9 2 2h3"/></svg>
+        Telemetría <small>PySpark</small></a>
+    </nav>
+    <div class="motor">
+      <b><span class="punto"></span><span class="motor-estado">Iniciando PySpark…</span></b>
+      SQL Server · Spark local · pandas/matplotlib
+    </div>
+  </aside>
+
+  <main class="contenido">
+    <header class="cabecera">
+      <div>
+        {% block etiqueta %}{% endblock %}
+        <h1>{% block encabezado %}{% endblock %}</h1>
+        <p>{% block bajada %}{% endblock %}</p>
+      </div>
+      <div class="reloj" aria-live="off"></div>
+    </header>
+    {% block contenido %}{% endblock %}
+  </main>
+</div>
+<div class="toasts" aria-live="polite"></div>
+<script>window.INTERVALO_MS = {{ intervalo_ms }};</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

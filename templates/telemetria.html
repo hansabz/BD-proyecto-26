@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{#
+  telemetria.html — Fase II, Big Data (ruta /telemetria).
+  Los logs de los sensores (CSV, Figura 6) NO están en la base: se procesan con PySpark.
+  Pasos del pipeline, cada uno con su botón:
+    1 Ingesta masiva · 2 Query BD 1 · 3 Query BD 2 · 4 Query BD 3
+    5 Nivel de riesgo -> asignacionCama.nivelRiesgo · 6 Exportación a Parquet
+  Debajo, el panel de datos con los logs (aquí sí existe el botón "Limpiar datos" = BD 1).
+#}
+{% block titulo %}Telemetría · Big Data{% endblock %}
+{% block etiqueta %}<span class="etiqueta-rf">Fase II · Big Data con PySpark</span>{% endblock %}
+{% block encabezado %}Telemetría de pacientes{% endblock %}
+{% block bajada %}Logs masivos de los sensores de los pacientes hospitalizados (Figura 6). Los logs no se guardan en la base: PySpark los limpia, clasifica cada lectura y solo el resultado —el nivel de riesgo de cada internación— se escribe en <span class="mono">asignacionCama.nivelRiesgo</span>.{% endblock %}
+
+{% block contenido %}
+<div class="kpis" id="kpis"></div>
+
+<section class="panel">
+  <div class="panel-cab">
+    <div><h2>Pipeline de datos</h2><span class="sub">Cada paso se ejecuta en PySpark sobre el archivo completo</span></div>
+  </div>
+  <div class="panel-cuerpo pipeline">
+    <article class="paso">
+      <header><span class="num-paso">1</span><div><h3>Ingesta masiva</h3><small>logs_monitoreo_pacientes.csv</small></div></header>
+      <p>Simula la telemetría de los pacientes internados, con el esquema de la Figura 6 (mínimo 5,000 registros). El archivo no se carga a la base.</p>
+      <form id="form-generar" class="fila-paso" novalidate>
+        <div class="campo"><input type="number" name="registros" value="6000" min="5000" step="500" aria-label="Cantidad de registros"></div>
+        <button type="submit" class="btn btn-primario">Generar logs</button>
+      </form>
+      <div class="resultado" id="r-generar"></div>
+    </article>
+    <article class="paso">
+      <header><span class="num-paso">2</span><div><h3>Query BD 1</h3><small>Limpieza y filtrado de anomalías</small></div></header>
+      <p>Quita lecturas nulas y fallas del sensor: FC &lt; 30 o &gt; 220 lpm, SpO2 fuera de 50–100 %.</p>
+      <button type="button" class="btn btn-spark" data-paso="bd1">Ejecutar</button>
+      <div class="resultado" id="r-bd1"></div>
+    </article>
+    <article class="paso">
+      <header><span class="num-paso">3</span><div><h3>Query BD 2</h3><small>Top 5 alertas críticas · Spark SQL</small></div></header>
+      <p>Sobre la vista temporal de los logs limpios: los 5 pacientes con más lecturas de SpO2 &lt; 90 %.</p>
+      <button type="button" class="btn btn-spark" data-paso="bd2">Ejecutar</button>
+      <div class="resultado" id="r-bd2"></div>
+    </article>
+    <article class="paso">
+      <header><span class="num-paso">4</span><div><h3>Query BD 3</h3><small>Clasificación de riesgo · UDF lambda</small></div></header>
+      <p>Evalúa FC y SpO2 a la vez e inyecta la columna <span class="mono">Nivel_Riesgo</span> (Bajo, Moderado, Crítico).</p>
+      <button type="button" class="btn btn-spark" data-paso="bd3">Ejecutar</button>
+      <div class="resultado" id="r-bd3"></div>
+    </article>
+    <article class="paso destacado">
+      <header><span class="num-paso">5</span><div><h3>Riesgo → SQL Server</h3><small>asignacionCama.nivelRiesgo</small></div></header>
+      <p>Cruza cada lectura con la internación del paciente y guarda su nivel sostenido: Crítico si ≥ 25 % de sus lecturas fueron críticas; Moderado si ≥ 25 % fueron moderadas o críticas; si no, Bajo.</p>
+      <button type="button" class="btn btn-primario" data-paso="riesgo">Calcular y guardar</button>
+      <div class="resultado" id="r-riesgo"></div>
+    </article>
+    <article class="paso">
+      <header><span class="num-paso">6</span><div><h3>Exportación Parquet</h3><small>.write.parquet()</small></div></header>
+      <p>Corre el pipeline completo (ingesta → BD 1 → BD 3) y guarda el DataFrame refinado en Parquet.</p>
+      <button type="button" class="btn btn-spark" data-paso="parquet">Exportar</button>
+      <div class="resultado" id="r-parquet"></div>
+    </article>
+  </div>
+</section>
+
+{% set titulo_panel = "Logs de monitoreo" %}
+{% set boton_nuevo = None %}
+{% include "_panel_datos.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Configuración del área que arma Flask (columnas, filtros, gráficas) -> la usa PanelDatos.
+window.AREA_CONFIG = {{ config_area | tojson }};
+const panel = new PanelDatos(window.AREA_CONFIG);
+
+const RIESGO = { "Crítico": "alerta", "Moderado": "aviso", "Bajo": "ok" };
+// Cómo mostrar el resultado de cada paso del pipeline (lo que devuelve /api/telemetria/<paso>).
+const pintar = {
+  bd1: (d) => `<b>${fmt.numero(d.validos)}</b> válidos de ${fmt.numero(d.leidos)} ·
+      <span style="color:var(--alert)">${fmt.numero(d.descartados)} descartados</span>
+      <ul>${d.por_motivo.map((m) => `<li>${esc(m.motivo)}: <b>${m.registros}</b></li>`).join("")}</ul>
+      <small>${d.segundos} s en Spark</small>`,
+  bd2: (d) => `<table class="datos mini"><thead><tr><th>#</th><th>Paciente</th><th class="num">Alertas</th><th class="num">SpO2 mín.</th></tr></thead>
+      <tbody>${d.filas.map((f, i) => `<tr><td>${i + 1}</td><td>${pulsera(f.ID_Paciente)}</td>
+        <td class="num"><b>${f.alertas_criticas}</b></td><td class="num">${f.spo2_minima} %</td></tr>`).join("")}</tbody></table>
+      <details><summary>Ver Spark SQL</summary><code>${esc(d.sql)}</code></details><small>${d.segundos} s en Spark</small>`,
+  bd3: (d) => `${["Crítico", "Moderado", "Bajo"].map((n) =>
+        `<span class="badge ${RIESGO[n]}">${n}: ${fmt.numero(d.distribucion[n] || 0)}</span>`).join(" ")}
+      <table class="datos mini" style="margin-top:8px"><thead><tr><th>Paciente</th><th class="num">FC</th><th class="num">SpO2</th><th>Riesgo</th></tr></thead>
+      <tbody>${d.muestra.map((f) => `<tr><td class="mono">${esc(f.ID_Paciente)}</td><td class="num">${f.Frecuencia_Cardiaca}</td>
+        <td class="num">${f.Saturacion_Oxigeno} %</td><td><span class="badge alerta">${esc(f.Nivel_Riesgo)}</span></td></tr>`).join("")}</tbody></table>
+      <small>${d.segundos} s en Spark</small>`,
+  riesgo: (d) => `<table class="datos mini"><thead><tr><th>Ingreso</th><th>Paciente</th><th class="num">Lecturas</th><th class="num">% crít.</th><th>Nivel</th></tr></thead>
+      <tbody>${d.internaciones.map((f) => `<tr><td class="mono">${esc(f.numeroIngreso)}</td><td class="mono">${esc(f.numeroPaciente)}</td>
+        <td class="num">${f.lecturas}</td><td class="num">${Math.round(100 * f.criticas / f.lecturas)} %</td>
+        <td>${celda({ campo: "nivelRiesgo", tipo: "riesgo" }, f)}</td></tr>`).join("")}</tbody></table>
+      <small>${d.internaciones.length} internaciones actualizadas · ${d.segundos} s</small>`,
+  parquet: (d) => `<b>${fmt.numero(d.verificacion.registros)}</b> registros refinados ·
+      método: <span class="mono">${esc(d.metodo)}</span><br>
+      <small class="mono">${esc(d.ruta)}</small>
+      <details><summary>Esquema releído del Parquet</summary><code>${d.verificacion.columnas.map(esc).join("<br>")}</code></details>
+      <small>${(d.bytes / 1024).toFixed(1)} KB · ${d.segundos} s</small>`,
+};
+
+// Botones de los pasos 2 a 6. Los que ESCRIBEN algo (riesgo, parquet) van por POST.
+$$("[data-paso]").forEach((boton) => boton.addEventListener("click", async () => {
+  const paso = boton.dataset.paso;
+  const caja = $(`#r-${paso}`);
+  const d = await conBoton(boton, () => ["parquet", "riesgo"].includes(paso)
+    ? API.post(`/api/telemetria/${paso}`) : API.get(`/api/telemetria/${paso}`));
+  if (!d) return;
+  caja.innerHTML = pintar[paso](d);
+  if (d.mensaje) toast(d.mensaje);
+  if (paso === "parquet" || paso === "riesgo") panel.cargar();
+}));
+
+// Paso 1: genera un CSV nuevo con N lecturas (mínimo 5,000).
+$("#form-generar").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await Form.enviar(e.target, (d) => API.post("/api/telemetria/generar", d));
+  if (r) {
+    $("#r-generar").innerHTML = `<b>${fmt.numero(r.registros)}</b> lecturas de ${r.pacientes} pacientes ·
+      ${r.fallas_inyectadas} fallas y ${r.nulos_inyectados} nulos inyectados`;
+    panel.cargar();
+  }
+});
+</script>
+{% endblock %}

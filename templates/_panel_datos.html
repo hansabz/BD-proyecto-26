@@ -1,0 +1,47 @@
+{#
+  Panel reutilizable por las 4 áreas: tabla en tiempo real, radio Tabla/Gráfico,
+  filtros (PySpark), limpieza (Query BD 1, solo en Telemetría) y gráficas (pandas + matplotlib).
+  Variables: titulo_panel, boton_nuevo (texto del botón de alta, opcional).
+#}
+<section class="panel" id="panel-datos">
+  <div class="panel-cab">
+    <div>
+      <h2>{{ titulo_panel }}</h2>
+      <span class="sub contador">cargando…</span>
+    </div>
+    <span class="envivo"><i></i>Conectando…</span>
+    <span class="espacio"></span>
+
+    <div class="seg" role="radiogroup" aria-label="Forma de ver los datos">
+      <label><input type="radio" name="vista" value="tabla" checked>
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/></svg>Tabla</span></label>
+      <label><input type="radio" name="vista" value="grafico">
+        <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Gráfico</span></label>
+    </div>
+
+    <button type="button" class="btn" data-abrir-filtros>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg>Filtrar</button>
+    <button type="button" class="btn btn-spark" data-limpiar title="Query Big Data 1: quita lecturas nulas, duplicadas y fallas del sensor">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.8 4.9L19 9.5l-4.4 2.9L16 18l-4-3-4 3 1.4-5.6L5 9.5l5.2-1.6z"/></svg>Limpiar datos</button>
+    <button type="button" class="btn" data-vivo hidden>Volver a datos en vivo</button>
+    {% if boton_nuevo %}
+    <button type="button" class="btn btn-primario" id="btn-nuevo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>{{ boton_nuevo }}</button>
+    {% endif %}
+  </div>
+
+  <form id="form-filtros" class="filtros" hidden></form>
+  <div class="chips" hidden></div>
+  <div id="reporte" class="reporte" hidden></div>
+
+  <div class="vista-tabla">
+    <div class="tabla-wrap">
+      <table class="datos"><thead></thead><tbody><tr><td class="vacio">Cargando datos de SQL Server…</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="vista-grafico" hidden>
+    <div class="lista-graficos" role="radiogroup" aria-label="Gráfica"></div>
+    <div class="lienzo"><img alt="Gráfica generada con matplotlib"><span class="nota"></span></div>
+  </div>
+</section>

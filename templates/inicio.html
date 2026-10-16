@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{#
+  inicio.html — Panel general (ruta /).
+  Resume las 5 áreas con sus métricas principales, la ocupación de camas por sala,
+  el stock crítico (Query 3), las próximas citas y los pacientes esperando cama.
+  Todo sale de GET /api/resumen; cada pocos segundos se consulta /api/resumen/firma
+  y, si algo cambió en la base, se vuelve a cargar (tiempo real).
+#}
+{% block titulo %}Panel general{% endblock %}
+{% block etiqueta %}<span class="etiqueta-rf">Hospital W 2.0 · Unidad gerontológica</span>{% endblock %}
+{% block encabezado %}Panel general del hospital{% endblock %}
+{% block bajada %}Resumen en tiempo real de todas las áreas del hospital. Los datos vienen de SQL Server y se actualizan solos cuando alguien registra un cambio.{% endblock %}
+
+{% block contenido %}
+<div class="areas-resumen" id="areas"></div>
+
+<div class="rejilla-2">
+  <section class="panel">
+    <div class="panel-cab"><div><h2>Ocupación de camas por sala</h2><span class="sub">en vivo</span></div>
+      <span class="espacio"></span><a class="btn btn-mini" href="/hospitalizacion">Ver mapa</a></div>
+    <div class="panel-cuerpo" id="ocupacion"></div>
+  </section>
+  <section class="panel">
+    <div class="panel-cab"><div><h2>Stock crítico</h2><span class="sub">Query 3 · bajo el 15 %</span></div>
+      <span class="espacio"></span><a class="btn btn-mini" href="/inventario">Inventario</a></div>
+    <div class="panel-cuerpo"><ul class="lista" id="critico"></ul></div>
+  </section>
+</div>
+
+<div class="rejilla-2">
+  <section class="panel">
+    <div class="panel-cab"><div><h2>Próximas citas</h2><span class="sub">consulta externa</span></div></div>
+    <div class="tabla-wrap"><table class="datos">
+      <thead><tr><th>No.</th><th>Fecha</th><th>Hora</th><th>Paciente</th><th>Médico</th></tr></thead>
+      <tbody id="citas"></tbody></table></div>
+  </section>
+  <section class="panel">
+    <div class="panel-cab"><div><h2>En espera de cama</h2><span class="sub">admitidos sin asignar</span></div>
+      <span class="espacio"></span><a class="btn btn-mini" href="/hospitalizacion">Asignar</a></div>
+    <div class="panel-cuerpo"><ul class="lista" id="pendientes"></ul></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Qué métricas de cada área se muestran en su tarjeta (índices de la lista de metricas()).
+const AREAS = {
+  personal: { titulo: "Personal", url: "/personal", tomar: [0, 1, 4, 5] },
+  pacientes: { titulo: "Pacientes", url: "/pacientes", tomar: [0, 1, 2, 3] },
+  hospitalizacion: { titulo: "Hospitalización", url: "/hospitalizacion", tomar: [0, 2, 3, 4] },
+  inventario: { titulo: "Inventario", url: "/inventario", tomar: [0, 1, 2, 3] },
+  telemetria: { titulo: "Telemetría (Big Data)", url: "/telemetria", tomar: [0, 1, 3, 4] },
+};
+let firma = null;
+
+function valor(m) {
+  if (m.formato === "moneda") return fmt.moneda(m.valor).replace(/\.00$/, "");
+  if (m.formato === "porcentaje") return `${m.valor} %`;
+  if (m.formato === "texto") return esc(m.valor);
+  return fmt.numero(m.valor);
+}
+
+// Carga todo el panel general desde GET /api/resumen.
+async function cargar() {
+  const d = await API.get("/api/resumen");
+  firma = d.firma;
+  marcarSpark(d.spark);
+  $("#areas").innerHTML = Object.entries(AREAS).map(([k, a]) => `
+    <a class="area-card" href="${a.url}"><h3>${a.titulo} <span aria-hidden="true">→</span></h3><dl>
+      ${a.tomar.map((i) => d.areas[k][i]).filter(Boolean).map((m) => `<dt>${esc(m.etiqueta)}</dt><dd class="${m.tono || ""}">${valor(m)}</dd>`).join("")}
+    </dl></a>`).join("");
+
+  const salas = {};
+  for (const c of d.camas) {
+    const s = (salas[c.sala] ??= { OCUP: 0, DISP: 0 });
+    s[c.ocupada ? "OCUP" : "DISP"]++;
+  }
+  $("#ocupacion").innerHTML = Object.entries(salas).map(([nombre, s]) => {
+    const total = s.OCUP + s.DISP;
+    const pct = (n) => (100 * n / total).toFixed(1);
+    return `<div class="ocupacion-sala"><div class="linea"><b>${esc(nombre)}</b>
+        <span>${s.OCUP} ocupadas · ${s.DISP} libres</span></div>
+      <div class="barra"><i style="width:${pct(s.OCUP)}%;background:var(--alert)"></i>
+        <i style="width:${pct(s.DISP)}%;background:var(--brand)"></i></div></div>`;
+  }).join("");
+
+  $("#critico").innerHTML = d.critico.map((c) => `<li class="alerta-stock"><span class="grow">
+      <b>${esc(c.suministro)}</b><small>${esc(c.ubicacion)} · ${c.existencia}/${c.capacidadNormal} (${c.porcentaje} %) · ${esc(c.proveedor)} <span class="mono">${esc(c.telefono)}</span></small></span></li>`).join("")
+    || `<li class="vacio" style="justify-content:center">Sin alertas de stock.</li>`;
+
+  $("#citas").innerHTML = d.citas.map((c) => `<tr><td class="mono">${esc(c.numeroCita)}</td><td>${fmt.fecha(c.fecha)}</td>
+      <td class="mono">${esc(c.hora)}</td><td>${esc(c.paciente)}</td><td>${esc(c.medico)}<span class="extra">${esc(c.especialidad)}</span></td></tr>`).join("")
+    || `<tr><td colspan="5" class="vacio">Sin citas próximas.</td></tr>`;
+
+  $("#pendientes").innerHTML = d.pendientes.map((p) => `<li>${pulsera(p.numeroPaciente)}<span class="grow">
+      <b>${esc(p.paciente)}</b><small>${esc(p.numeroIngreso)} · ${p.edad} años · admitido ${fmt.fecha(p.fechaReg)}</small></span></li>`).join("")
+    || `<li class="vacio" style="justify-content:center">Nadie esperando cama.</li>`;
+}
+
+// Tiempo real: si la "firma" de la base cambió, se recarga el panel.
+async function vigilar() {
+  if (document.hidden) return;
+  try {
+    const d = await API.get("/api/resumen/firma");
+    marcarSpark(d.spark);
+    if (d.firma !== firma) cargar();
+  } catch { /* reintenta en el próximo ciclo */ }
+}
+
+cargar();
+setInterval(vigilar, window.INTERVALO_MS);
+</script>
+{% endblock %}

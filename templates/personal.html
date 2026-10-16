@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{#
+  personal.html — RF1: Gestión del personal médico y administrativo (ruta /personal).
+  • Panel de datos (tabla en vivo / gráficas / filtros) — ver _panel_datos.html
+  • Reporte de la Query 1 (vista VW_Asignacion_Personal, Figura 1) por sala
+  • Diálogo de alta/edición de empleado: el ID (M/E/A + número) lo genera PySpark
+    según el puesto; NSS único; fecha de contratación obligatoria
+  • Baja lógica / reactivación con confirmación
+#}
+{% block titulo %}Personal{% endblock %}
+{% block etiqueta %}<span class="etiqueta-rf">RF1 · Gestión de personal</span>{% endblock %}
+{% block encabezado %}Personal médico y administrativo{% endblock %}
+{% block bajada %}Registro, modificación, consulta y baja lógica. El NSS es único y cada empleado queda atado a un puesto, una especialidad y un turno del catálogo. El ID se genera en PySpark según el rol: <b>M</b> médicos, <b>E</b> enfermería, <b>A</b> auxiliares.{% endblock %}
+
+{% block contenido %}
+<div class="kpis" id="kpis"></div>
+
+{% set titulo_panel = "Nómina del personal" %}
+{% set boton_nuevo = "Nuevo empleado" %}
+{% include "_panel_datos.html" %}
+
+<section class="panel reporte-oficial">
+  <div class="panel-cab">
+    <div>
+      <h2>Asignación de personal por sala</h2>
+      <span class="sub">Query 1 · vista <span class="mono">VW_Asignacion_Personal</span> (Figura 1)</span>
+    </div>
+    <span class="espacio"></span>
+    <div class="campo" style="min-width:260px"><select id="sala-reporte" aria-label="Sala"></select></div>
+  </div>
+  <div class="encabezado" id="encabezado-sala"></div>
+  <div class="tabla-wrap" style="max-height:none">
+    <table class="datos">
+      <thead><tr><th>No. Emp</th><th>Nombre empleado</th><th>NSS</th><th>Puesto</th><th>Especialidad</th><th>Turno</th><th class="num">Salario base (Q.)</th></tr></thead>
+      <tbody id="tabla-sala"></tbody>
+    </table>
+  </div>
+</section>
+
+<dialog id="dlg-empleado">
+  <form id="form-empleado" novalidate>
+    <div class="dlg-cab">
+      <div><h2 id="titulo-empleado">Nuevo empleado</h2><p id="sub-empleado">Los campos con * son obligatorios.</p></div>
+      <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button>
+    </div>
+    <div class="dlg-cuerpo">
+      <div class="form-grid">
+        <div class="c6 id-previo" id="id-previo">El ID se genera automáticamente al guardar, según el puesto.</div>
+        <div class="seccion-form">Datos personales</div>
+        <div class="campo c3"><label for="e-nombres">Nombres *</label><input id="e-nombres" name="nombres" maxlength="25" autocomplete="off" required></div>
+        <div class="campo c3"><label for="e-apellidos">Apellidos *</label><input id="e-apellidos" name="apellidos" maxlength="25" autocomplete="off" required></div>
+        <div class="campo c2"><label for="e-contrato">Fecha de contratación *</label><input type="date" id="e-contrato" name="fechaContratacion" required>
+          <span class="ayuda" id="e-antiguedad"></span></div>
+        <div class="campo c2"><label for="e-nss">NSS *</label><input id="e-nss" name="NSS" maxlength="8" placeholder="883920-K" class="mono" autocomplete="off" required>
+          <span class="ayuda">6 dígitos, guion y un dígito o letra. Único.</span></div>
+        <div class="seccion-form">Datos laborales (catálogos)</div>
+        <div class="campo c2"><label for="e-puesto">Puesto *</label><select id="e-puesto" name="codigoPuesto" required></select></div>
+        <div class="campo c2"><label for="e-esp">Especialidad *</label><select id="e-esp" name="codigoEspecialidad" required></select></div>
+        <div class="campo c2"><label for="e-turno">Turno laboral *</label><select id="e-turno" name="codigoTurno" required></select></div>
+        <div class="campo c6"><span class="rotulo">Salas asignadas</span><div class="salas-check" id="e-salas"></div></div>
+      </div>
+    </div>
+    <div class="dlg-pie">
+      <span class="error-general"></span>
+      <button type="button" class="btn" data-cerrar>Cancelar</button>
+      <button type="submit" class="btn btn-primario">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirmar" class="angosto">
+  <div class="dlg-cab"><div><h2 id="conf-titulo"></h2><p id="conf-texto"></p></div>
+    <button type="button" class="dlg-cerrar" data-cerrar aria-label="Cerrar">×</button></div>
+  <div class="dlg-pie"><button type="button" class="btn" data-cerrar>Cancelar</button>
+    <button type="button" class="btn btn-primario" id="conf-ok">Confirmar</button></div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Configuración del área que arma Flask (columnas, filtros, gráficas) -> la usa PanelDatos.
+window.AREA_CONFIG = {{ config_area | tojson }};
+
+let catalogos = null;
+let editando = null;
+const form = $("#form-empleado");
+
+// Solo para MOSTRAR qué prefijo tendrá el ID; el ID real lo genera PySpark en el servidor.
+const PREFIJOS = (nombre) => {
+  const rol = nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(" ")[0];
+  return { medico: "M", doctor: "M", enfermera: "E", enfermero: "E", auxiliar: "A" }[rol] || "?";
+};
+
+// Llena los <select> del formulario con los catálogos (puestos, especialidades, turnos, salas).
+async function cargarCatalogos() {
+  catalogos = await API.get("/api/personal/catalogos");
+  opciones($("#e-puesto"), catalogos.puestos, { texto: (p) => `${p.nombre} — ${fmt.moneda(p.salario)}` });
+  opciones($("#e-esp"), catalogos.especialidades);
+  opciones($("#e-turno"), catalogos.turnos);
+  $("#e-salas").innerHTML = catalogos.salas.map((s) =>
+    `<label><input type="checkbox" name="salas[]" value="${s.id}">${esc(s.nombre)}</label>`).join("");
+  opciones($("#sala-reporte"), catalogos.salas, { vacio: "Todas las salas" });
+}
+
+// Muestra la antigüedad mientras se elige la fecha de contratación.
+$("#e-contrato").addEventListener("input", (e) => {
+  const v = e.target.value;
+  const anios = v ? (Date.now() - new Date(v + "T00:00")) / (365.25 * 864e5) : null;
+  $("#e-antiguedad").textContent = anios === null ? "" : anios < 0 ? "Fecha futura" : `${anios.toFixed(1)} años de antigüedad`;
+});
+
+$("#e-puesto").addEventListener("change", (e) => {
+  if (editando) return;
+  const p = catalogos.puestos.find((x) => x.id === e.target.value);
+  $("#id-previo").innerHTML = p
+    ? `Rol detectado: <b>${esc(p.nombre)}</b> → el ID empezará con <span class="pulsera ${PREFIJOS(p.nombre)}">${PREFIJOS(p.nombre)}####</span> (siguiente número libre, calculado en PySpark).`
+    : "El ID se genera automáticamente al guardar, según el puesto.";
+});
+
+// Abre el formulario vacío para un empleado nuevo.
+function abrirAlta() {
+  editando = null;
+  form.reset();
+  $("#titulo-empleado").textContent = "Nuevo empleado";
+  $("#sub-empleado").textContent = "Los campos con * son obligatorios.";
+  $("#id-previo").textContent = "El ID se genera automáticamente al guardar, según el puesto.";
+  $("#e-antiguedad").textContent = "";
+  abrirDialogo("dlg-empleado");
+  $("#e-nombres").focus();
+}
+
+// Abre el formulario con los datos del empleado `r` para modificarlo.
+function abrirEdicion(r) {
+  editando = r.numeroEmpleado;
+  form.reset();
+  Form.llenar(form, { ...r, salas: r.codigosSala ? r.codigosSala.split(",") : [] });
+  $("#titulo-empleado").innerHTML = `Editar ${pulsera(r.numeroEmpleado)}`;
+  $("#sub-empleado").textContent = `${r.nombres} ${r.apellidos} · contratado el ${fmt.fecha(r.fechaContratacion)} (${fmt.numero(r.antiguedad)} años)`;
+  $("#e-contrato").dispatchEvent(new Event("input"));
+  $("#id-previo").textContent = "El ID no cambia. Si cambia de rol (por ejemplo de auxiliar a médico), corresponde baja y nuevo registro.";
+  abrirDialogo("dlg-empleado");
+}
+
+// Guardar: POST (alta) o PUT (edición). Si el servidor devuelve errores, se marcan en el formulario.
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const r = await Form.enviar(form, (datos) => editando
+    ? API.put(`/api/personal/empleado/${editando}`, datos)
+    : API.post("/api/personal", datos));
+  if (r) { $("#dlg-empleado").close(); panel.cargar(); cargarReporte(); }
+});
+
+// Diálogo de confirmación genérico (baja lógica / reactivación).
+function confirmar(titulo, texto, accion) {
+  $("#conf-titulo").textContent = titulo;
+  $("#conf-texto").textContent = texto;
+  const d = abrirDialogo("dlg-confirmar");
+  $("#conf-ok").onclick = async (e) => {
+    const r = await conBoton(e.currentTarget, accion);
+    if (r) { toast(r.mensaje); d.close(); panel.cargar(); cargarReporte(); }
+  };
+}
+
+// Tabla en vivo del personal. `acciones` define los botones de cada fila.
+const panel = new PanelDatos(window.AREA_CONFIG, {
+  acciones: (r) => [
+    { texto: "Editar", fn: abrirEdicion },
+    r.activo
+      ? { texto: "Dar de baja", clase: "btn-peligro", fn: (r) => confirmar(`Dar de baja a ${r.numeroEmpleado}`,
+          `${r.nombres} ${r.apellidos} quedará inactivo. Es una baja lógica: el registro y su historial se conservan y se puede reactivar.`,
+          () => API.post(`/api/personal/empleado/${r.numeroEmpleado}/baja`)) }
+      : { texto: "Reactivar", fn: (r) => confirmar(`Reactivar a ${r.numeroEmpleado}`, `${r.nombres} ${r.apellidos} vuelve a estar activo.`,
+          () => API.post(`/api/personal/empleado/${r.numeroEmpleado}/reactivar`)) },
+  ],
+  alActualizar: () => cargarReporte(),
+});
+$("#btn-nuevo").addEventListener("click", abrirAlta);
+
+// Query 1: lee VW_Asignacion_Personal (filtrada por sala) y la muestra como la Figura 1.
+async function cargarReporte() {
+  const sala = $("#sala-reporte").value;
+  const filas = await API.get(`/api/personal/asignacion${sala ? `?sala=${sala}` : ""}`);
+  const salas = [...new Map(filas.map((f) => [f.codigoSala, f])).values()];
+  $("#encabezado-sala").innerHTML = salas.length
+    ? salas.map((s) => `<b>Sala:</b> ${esc(s.sala)} &nbsp;|&nbsp; <b>Camas disponibles:</b> ${s.camasDisponibles}`).join("<br>")
+    : "Sin personal activo asignado a esta sala.";
+  $("#tabla-sala").innerHTML = filas.map((f) => `<tr>
+      <td>${pulsera(f.numeroEmpleado)}</td><td>${esc(f.nombreEmpleado)}</td><td class="mono">${esc(f.NSS)}</td>
+      <td>${esc(f.puesto)}</td><td>${esc(f.especialidad)}</td><td><span class="turno">${esc(f.turno)}</span></td>
+      <td class="num">${fmt.moneda(f.salarioBase).replace("Q.", "")}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="vacio">—</td></tr>`;
+}
+$("#sala-reporte").addEventListener("change", cargarReporte);
+
+cargarCatalogos().then(cargarReporte);
+</script>
+{% endblock %}

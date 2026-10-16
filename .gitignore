@@ -1,0 +1,21 @@
+# Entorno virtual de Python (cada uno crea el suyo con: python -m venv .venv)
+.venv/
+venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.pyc
+
+# Salidas que se regeneran (pipeline de Big Data / Spark)
+bigdata/datos/logs_refinados.parquet/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Configuración local de cada máquina
+.env
+.vscode/
+.idea/
+
+# Archivos temporales de Office (cuando el manual está abierto en Word)
+~$*
