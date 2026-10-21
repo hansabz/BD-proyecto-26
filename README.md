@@ -52,8 +52,8 @@ Requisitos (Windows):
 | ODBC Driver for SQL Server | 17 o 18 | viene con SSMS; si no, se baja de Microsoft |
 
 ```powershell
-git clone https://github.com/hansabz/BD-proyect-2026.git
-cd BD-proyect-2026
+git clone https://github.com/hansabz/BD-proyecto-26.git
+cd BD-proyecto-26
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 .\.venv\Scripts\python setup_db.py --reset   # crea hospitalProyecto + datos + logs + nivel de riesgo (¡BORRA la base si ya existía!)
@@ -88,7 +88,7 @@ Subir `bigdata/HospitalW_BigData.ipynb` a Google Colab (*Archivo → Subir noteb
 ## Mapa del código
 
 ```
-BD-proyect-2026/
+BD-proyecto-26/
 ├── app.py                 Servidor Flask: TODAS las rutas (páginas y API). Empezá a leer por acá.
 ├── setup_db.py            Crea la base, ejecuta sql/, carga datos de prueba y genera los logs.
 ├── exportar_datos_sql.py  Exporta los datos de la base a sql/03_datos_prueba.sql.
