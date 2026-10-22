@@ -259,9 +259,12 @@ def cargar_datos(cur):
             stock.append([ubi, cod, int(capacidad * rnd.uniform(0.2, 1.0)), capacidad])
     for fila in rnd.sample(stock, 6):          # stock crítico (< 15 %)
         fila[2] = int(fila[3] * rnd.uniform(0.0, 0.13))
-    # Ficha (capacidad normal = cantidadOrdenada) y luego el stock actual (FK en ese orden).
-    cur.executemany("INSERT INTO informeSuministroIngreso VALUES (?,?,?)", [(u, c, cap) for u, c, _, cap in stock])
-    cur.executemany("INSERT INTO suministroUbicacion VALUES (?,?,?)", [(u, c, ex) for u, c, ex, _ in stock])
+    # Ficha de ingreso y luego el stock actual con su cantidad ideal (FK en ese orden).
+    # cantidadOrdenada arranca con el stock inicial; abajo se le suman las entradas del historial.
+    cur.executemany("INSERT INTO informeSuministroIngreso (codigoUbicacion, codigoSuministro, cantidadOrdenada)"
+                    " VALUES (?,?,?)", [(u, c, ex) for u, c, ex, _ in stock])
+    cur.executemany("INSERT INTO suministroUbicacion (codigoUbicacion, codigoSuministro, cantidadDisponible,"
+                    " cantidadIdeal) VALUES (?,?,?,?)", [(u, c, ex, ideal) for u, c, ex, ideal in stock])
 
     # Historial: entradas, salidas a personal y traslados entre almacenes (últimos 90 días).
     activos = [e[0] for e in EMPLEADOS if e[8]]
@@ -285,6 +288,12 @@ def cargar_datos(cur):
                     " VALUES (?,?,?,?)", entradas)
     cur.executemany("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, codigoSuministro, cantidadDespachada,"
                     " codigoUbicacionDestino, empleadoDestinatario, fecha) VALUES (?,?,?,?,?,?)", salidas)
+    # Total ordenado = stock inicial + todas las entradas registradas.
+    cur.execute("""UPDATE ig SET cantidadOrdenada = ig.cantidadOrdenada + e.total
+                   FROM informeSuministroIngreso ig
+                   JOIN (SELECT codigoUbicacion, codigoSuministro, SUM(cantidad) AS total
+                         FROM entradaSuministro GROUP BY codigoUbicacion, codigoSuministro) e
+                     ON e.codigoUbicacion = ig.codigoUbicacion AND e.codigoSuministro = ig.codigoSuministro""")
 
 
 def main():

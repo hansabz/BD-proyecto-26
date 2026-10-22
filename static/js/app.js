@@ -69,7 +69,7 @@ function celda(col, r) {
     case "alerta": return v === "Sí" ? `<span class="badge alerta">Sí</span>` : `<span class="badge gris">${esc(v ?? "—")}</span>`;
     case "stock": {
       const pct = Math.min(100, Number(r.porcentaje) || 0);
-      return `<div class="stock ${r.critico ? "critico" : ""}"><b>${fmt.numero(v)}</b> <small>/ ${fmt.numero(r.capacidadNormal)} · ${fmt.numero(r.porcentaje)} %</small>
+      return `<div class="stock ${r.critico ? "critico" : ""}"><b>${fmt.numero(v)}</b> <small>/ ${fmt.numero(r.cantidadIdeal)} · ${fmt.numero(r.porcentaje)} %</small>
               <div class="barra"><i style="width:${pct}%"></i></div></div>`;
     }
     default: return `${esc(v ?? "—")}${extra}`;

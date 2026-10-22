@@ -163,10 +163,10 @@ GO
 
 -- RF4 — Inventario ----------------------------------------------------
 -- Flujo con las tablas del script actualizado:
---   informeSuministroIngreso  qué insumo se maneja en qué ubicación y cuánto se ORDENA
---                             para tenerla llena (cantidadOrdenada = capacidad normal,
---                             base del 15 % de Query 3)
---   suministroUbicacion       cuánto hay HOY en esa ubicación (cantidadDisponible)
+--   informeSuministroIngreso  qué insumo se maneja en qué ubicación y cuánto se ha ORDENADO
+--                             en total (cantidadOrdenada se acumula con cada entrada)
+--   suministroUbicacion       cuánto hay HOY (cantidadDisponible) y cuánto DEBERÍA haber
+--                             (cantidadIdeal, base del 15 % de la Query 3)
 --   entradaSuministro         bitácora de entradas (reabastecimiento)
 --   informeSuministroSalida   bitácora de salidas (a un empleado) y traslados entre almacenes
 
@@ -207,9 +207,9 @@ GO
 CREATE TABLE informeSuministroIngreso(      -- tal cual el script
     codigoUbicacion     varchar(5) NOT NULL,
     codigoSuministro    varchar(5) NOT NULL,
-    cantidadOrdenada    int        NOT NULL,   -- cantidad normal que se ordena = capacidad normal
+    cantidadOrdenada    int        NOT NULL,   -- total ordenado/ingresado a esta ubicación (suma de entradas)
     CONSTRAINT PK_informeSuministroIngreso PRIMARY KEY (codigoUbicacion, codigoSuministro),
-    CONSTRAINT CK_informeSuministroIngreso_cantidad CHECK (cantidadOrdenada > 0),
+    CONSTRAINT CK_informeSuministroIngreso_cantidad CHECK (cantidadOrdenada >= 0),
     CONSTRAINT FK_informeSuministroIngreso_ubicacion FOREIGN KEY (codigoUbicacion) REFERENCES ubicacion(codigoUbicacion),
     CONSTRAINT FK_informeSuministroIngreso_suministro FOREIGN KEY (codigoSuministro) REFERENCES suministro(codigoSuministro)
 );
@@ -218,9 +218,12 @@ GO
 CREATE TABLE suministroUbicacion(           -- tal cual el script
     codigoUbicacion     varchar(5) NOT NULL,
     codigoSuministro    varchar(5) NOT NULL,
-    cantidadDisponible  int        NOT NULL,
+    cantidadDisponible  int        NOT NULL,   -- stock actual
+    cantidadIdeal       int        NOT NULL,   -- [AJUSTE] nivel ideal de stock en esta ubicación:
+                                               -- la Query 3 compara cantidadDisponible contra este valor
     CONSTRAINT PK_suministroUbicacion PRIMARY KEY (codigoUbicacion, codigoSuministro),
     CONSTRAINT CK_suministroUbicacion_cantidad CHECK (cantidadDisponible >= 0),   -- [AJUSTE] nunca stock negativo
+    CONSTRAINT CK_suministroUbicacion_ideal CHECK (cantidadIdeal > 0),            -- [AJUSTE] evita dividir entre 0
     CONSTRAINT FK_suministroUbicacion_ubicacion FOREIGN KEY (codigoUbicacion, codigoSuministro)
         REFERENCES informeSuministroIngreso(codigoUbicacion, codigoSuministro)
 );

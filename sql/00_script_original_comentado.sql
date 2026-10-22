@@ -214,8 +214,8 @@ constraint PK_suministro primary key (codigoSuministro)
 -- (RF4 pide un proveedor "debidamente registrado" y la Query 3 sus datos de contacto),
 -- se agrega tipo (Q/F/M) y costoUnitario sube a dec(7,2).
 
--- Ficha de cada insumo en cada ubicación. cantidadOrdenada = la cantidad normal que se
--- ordena para tener la ubicación llena = "capacidad normal", base del 15 % de la Query 3.
+-- Ficha de cada insumo en cada ubicación. cantidadOrdenada = total ordenado/ingresado a esa
+-- ubicación (en la app se acumula con cada entrada).
 create table informeSuministroIngreso(
 codigoUbicacion		varchar(5) not null,
 codigoSuministro	varchar(5) not null,
@@ -226,6 +226,8 @@ constraint FK_informeSuministroIngreso_suministro foreign key (codigoSuministro)
 )
 
 -- Existencia actual (stock) de cada insumo en cada ubicación.
+-- En 01_esquema.sql se agrega cantidadIdeal (int): el nivel ideal de stock. La Query 3 marca
+-- como crítico todo insumo con cantidadDisponible < 15 % de cantidadIdeal.
 create table suministroUbicacion(
 codigoUbicacion		varchar(5) not null,
 codigoSuministro	varchar(5) not null,

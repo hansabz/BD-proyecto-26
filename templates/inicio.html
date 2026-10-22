@@ -86,7 +86,7 @@ async function cargar() {
   }).join("");
 
   $("#critico").innerHTML = d.critico.map((c) => `<li class="alerta-stock"><span class="grow">
-      <b>${esc(c.suministro)}</b><small>${esc(c.ubicacion)} · ${c.existencia}/${c.capacidadNormal} (${c.porcentaje} %) · ${esc(c.proveedor)} <span class="mono">${esc(c.telefono)}</span></small></span></li>`).join("")
+      <b>${esc(c.suministro)}</b><small>${esc(c.ubicacion)} · ${c.existencia}/${c.cantidadIdeal} (${c.porcentaje} %) · ${esc(c.proveedor)} <span class="mono">${esc(c.telefono)}</span></small></span></li>`).join("")
     || `<li class="vacio" style="justify-content:center">Sin alertas de stock.</li>`;
 
   $("#citas").innerHTML = d.citas.map((c) => `<tr><td class="mono">${esc(c.numeroCita)}</td><td>${fmt.fecha(c.fecha)}</td>

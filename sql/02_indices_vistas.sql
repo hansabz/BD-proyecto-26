@@ -118,7 +118,7 @@ GO
 /* ---------------------------------------------------------------------
    Query 3 — Alerta de stock crítico de insumos
    Existencia actual (suministroUbicacion.cantidadDisponible) por debajo del
-   15 % de la capacidad normal (informeSuministroIngreso.cantidadOrdenada),
+   15 % de la cantidad ideal (suministroUbicacion.cantidadIdeal),
    con los datos de contacto del proveedor para reabastecer.
    Uso: SELECT * FROM VW_Stock_Critico ORDER BY porcentaje;
    --------------------------------------------------------------------- */
@@ -129,19 +129,17 @@ SELECT
     su.tipo,
     u.nombre                                        AS ubicacion,
     sb.cantidadDisponible                           AS existencia,
-    ig.cantidadOrdenada                             AS capacidadNormal,
-    CAST(100.0 * sb.cantidadDisponible / ig.cantidadOrdenada AS dec(5,1)) AS porcentaje,
+    sb.cantidadIdeal,
+    CAST(100.0 * sb.cantidadDisponible / sb.cantidadIdeal AS dec(5,1)) AS porcentaje,
     pr.nombre                                       AS proveedor,
     pr.contacto,
     pr.telefono,
     pr.correo
 FROM suministroUbicacion sb
-JOIN informeSuministroIngreso ig ON ig.codigoUbicacion = sb.codigoUbicacion
-                                AND ig.codigoSuministro = sb.codigoSuministro
 JOIN suministro su ON su.codigoSuministro = sb.codigoSuministro
 JOIN ubicacion  u  ON u.codigoUbicacion   = sb.codigoUbicacion
 JOIN proveedor  pr ON pr.codigoProveedor  = su.codigoProveedor
-WHERE sb.cantidadDisponible < 0.15 * ig.cantidadOrdenada;
+WHERE sb.cantidadDisponible < 0.15 * sb.cantidadIdeal;
 GO
 
 /* ---------------------------------------------------------------------

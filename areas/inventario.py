@@ -2,8 +2,9 @@
 areas/inventario.py — RF4: Gestión de inventario de suministros médicos (Figura 5) + Query 3.
 
 Tablas (script actualizado):
-    informeSuministroIngreso  (ubicación, insumo) -> cantidadOrdenada = capacidad normal
-    suministroUbicacion       (ubicación, insumo) -> cantidadDisponible = stock actual
+    informeSuministroIngreso  (ubicación, insumo) -> cantidadOrdenada = total ordenado (suma de entradas)
+    suministroUbicacion       (ubicación, insumo) -> cantidadDisponible = stock actual,
+                                                     cantidadIdeal = nivel ideal (base de la Query 3)
     entradaSuministro         bitácora de entradas  [AJUSTE]
     informeSuministroSalida   bitácora de salidas (a un empleado) y traslados entre almacenes
 
@@ -30,18 +31,18 @@ TIPOS = {"Q": "Quirúrgico", "F": "Farmacéutico", "M": "Material médico"}
 
 # Una fila por (ubicación, insumo): existencia, % de la capacidad, valor (existencia × costo),
 # proveedor, y la marca "critico" si está bajo el 15 % (mismo criterio que VW_Stock_Critico).
-# Se renombran las columnas (existencia, capacidadNormal) para que la interfaz no dependa
+# Se renombra cantidadDisponible -> existencia para que la interfaz no dependa
 # de los nombres de las tablas. idStock = "U01/Q001": clave única de la fila.
 BASE_SQL = f"""
 SELECT sb.codigoUbicacion + '/' + sb.codigoSuministro AS idStock,
        su.codigoSuministro, su.nombre AS suministro, su.descripcion, su.tipo,
        CASE su.tipo WHEN 'Q' THEN 'Quirúrgico' WHEN 'F' THEN 'Farmacéutico' ELSE 'Material médico' END AS tipoNombre,
        sb.codigoUbicacion, u.nombre AS ubicacion,
-       sb.cantidadDisponible AS existencia, ig.cantidadOrdenada AS capacidadNormal,
-       CAST(100.0 * sb.cantidadDisponible / ig.cantidadOrdenada AS dec(6,1)) AS porcentaje,
+       sb.cantidadDisponible AS existencia, sb.cantidadIdeal, ig.cantidadOrdenada,
+       CAST(100.0 * sb.cantidadDisponible / sb.cantidadIdeal AS dec(6,1)) AS porcentaje,
        su.costoUnitario, CAST(sb.cantidadDisponible * su.costoUnitario AS dec(12,2)) AS valorInventario,
        su.codigoProveedor, pr.nombre AS proveedor,
-       CAST(CASE WHEN sb.cantidadDisponible < {config.UMBRAL_STOCK_CRITICO} * ig.cantidadOrdenada
+       CAST(CASE WHEN sb.cantidadDisponible < {config.UMBRAL_STOCK_CRITICO} * sb.cantidadIdeal
                  THEN 1 ELSE 0 END AS bit) AS critico
 FROM suministroUbicacion sb
 JOIN informeSuministroIngreso ig ON ig.codigoUbicacion = sb.codigoUbicacion
@@ -80,7 +81,7 @@ def metricas() -> list[dict]:
     return [
         {"etiqueta": "Insumos en catálogo", "valor": m["insumos"] or 0, "detalle": "quirúrgicos y farmacéuticos"},
         {"etiqueta": "Valor del inventario", "valor": m["valor"] or 0, "formato": "moneda", "detalle": "existencia × costo"},
-        {"etiqueta": "Stock crítico", "valor": m["criticos"] or 0, "detalle": "< 15 % de la capacidad",
+        {"etiqueta": "Stock crítico", "valor": m["criticos"] or 0, "detalle": "< 15 % de la cantidad ideal",
          "tono": "alerta" if m["criticos"] else ""},
         {"etiqueta": "Proveedores", "valor": proveedores or 0, "detalle": "registrados"},
         {"etiqueta": "Entradas (7 días)", "valor": semana["entradas"] or 0, "detalle": "reabastecimiento"},
@@ -164,7 +165,7 @@ def _entero(valor, campo, errores, minimo=0):
 
 
 def _validar_suministro(datos: dict, nuevo: bool) -> dict:
-    """Al crear también se pide la ubicación y el stock inicial; al editar, solo los datos del insumo."""
+    """Al crear también se pide la ubicación, el stock inicial y la cantidad ideal; al editar, solo los datos del insumo."""
     d = {
         "nombre": " ".join((datos.get("nombre") or "").split()),
         "descripcion": " ".join((datos.get("descripcion") or "").split()) or None,
@@ -194,20 +195,31 @@ def _validar_suministro(datos: dict, nuevo: bool) -> dict:
         if not db.escalar("SELECT COUNT(*) FROM ubicacion WHERE codigoUbicacion = ?", (d["codigoUbicacion"],)):
             errores["codigoUbicacion"] = "Elegí la ubicación inicial."
         d["existencia"] = _entero(datos.get("existencia"), "existencia", errores, 0)
-        d["capacidadNormal"] = _entero(datos.get("capacidadNormal"), "capacidadNormal", errores, 1)
+        d["cantidadIdeal"] = _entero(datos.get("cantidadIdeal"), "cantidadIdeal", errores, 1)
     if errores:
         raise ErrorNegocio(errores)
     return d
 
 
-def _habilitar_en_ubicacion(cur, ubicacion: str, codigo: str, capacidad: int) -> None:
+def _habilitar_en_ubicacion(cur, ubicacion: str, codigo: str, ideal: int) -> None:
     """
     Primera vez que un insumo llega a una ubicación: se crea su ficha en
-    informeSuministroIngreso (con la capacidad normal) y su fila de stock en 0.
-    El orden importa: suministroUbicacion tiene FK hacia informeSuministroIngreso.
+    informeSuministroIngreso (todavía sin nada ordenado) y su fila de stock en 0
+    con la cantidad ideal. El orden importa: suministroUbicacion tiene FK hacia
+    informeSuministroIngreso.
     """
-    cur.execute("INSERT INTO informeSuministroIngreso VALUES (?, ?, ?)", ubicacion, codigo, capacidad)
-    cur.execute("INSERT INTO suministroUbicacion VALUES (?, ?, 0)", ubicacion, codigo)
+    cur.execute("INSERT INTO informeSuministroIngreso (codigoUbicacion, codigoSuministro, cantidadOrdenada)"
+                " VALUES (?, ?, 0)", ubicacion, codigo)
+    cur.execute("INSERT INTO suministroUbicacion (codigoUbicacion, codigoSuministro, cantidadDisponible, cantidadIdeal)"
+                " VALUES (?, ?, 0, ?)", ubicacion, codigo, ideal)
+
+
+def _registrar_orden(cur, ubicacion: str, codigo: str, cantidad: int) -> None:
+    """Cada entrada suma a cantidadOrdenada (total ordenado a esa ubicación) y queda en la bitácora."""
+    cur.execute("UPDATE informeSuministroIngreso SET cantidadOrdenada = cantidadOrdenada + ?"
+                " WHERE codigoUbicacion = ? AND codigoSuministro = ?", cantidad, ubicacion, codigo)
+    cur.execute("INSERT INTO entradaSuministro (codigoUbicacion, codigoSuministro, cantidad) VALUES (?, ?, ?)",
+                ubicacion, codigo, cantidad)
 
 
 def crear_suministro(datos: dict) -> dict:
@@ -218,13 +230,10 @@ def crear_suministro(datos: dict) -> dict:
         with db.transaccion() as cur:
             cur.execute("INSERT INTO suministro VALUES (?,?,?,?,?,?)", codigo, d["nombre"], d["descripcion"],
                         d["tipo"], d["costoUnitario"], d["codigoProveedor"])
-            _habilitar_en_ubicacion(cur, d["codigoUbicacion"], codigo, d["capacidadNormal"])
+            _habilitar_en_ubicacion(cur, d["codigoUbicacion"], codigo, d["cantidadIdeal"])
             if d["existencia"]:
-                cur.execute("UPDATE suministroUbicacion SET cantidadDisponible = ?"
-                            " WHERE codigoUbicacion = ? AND codigoSuministro = ?",
-                            d["existencia"], d["codigoUbicacion"], codigo)
-                cur.execute("INSERT INTO entradaSuministro (codigoUbicacion, codigoSuministro, cantidad)"
-                            " VALUES (?, ?, ?)", d["codigoUbicacion"], codigo, d["existencia"])
+                _sumar(cur, d["codigoUbicacion"], codigo, d["existencia"])
+                _registrar_orden(cur, d["codigoUbicacion"], codigo, d["existencia"])
     return {"codigoSuministro": codigo, "mensaje": f"Insumo {codigo} registrado."}
 
 
@@ -318,13 +327,12 @@ def registrar_movimiento(datos: dict) -> dict:
     with db.transaccion() as cur:
         if tipo == "E":
             if _stock_bloqueado(cur, ubicacion, codigo) is None:
-                capacidad = _entero(datos.get("capacidadNormal"), "capacidadNormal", errores, 1)
+                ideal = _entero(datos.get("cantidadIdeal"), "cantidadIdeal", errores, 1)
                 if errores:
-                    raise ErrorNegocio({"capacidadNormal": "Primera entrada en esta ubicación: indicá la capacidad normal."})
-                _habilitar_en_ubicacion(cur, ubicacion, codigo, capacidad)
+                    raise ErrorNegocio({"cantidadIdeal": "Primera entrada en esta ubicación: indicá la cantidad ideal."})
+                _habilitar_en_ubicacion(cur, ubicacion, codigo, ideal)
             _sumar(cur, ubicacion, codigo, cantidad)
-            cur.execute("INSERT INTO entradaSuministro (codigoUbicacion, codigoSuministro, cantidad) VALUES (?, ?, ?)",
-                        ubicacion, codigo, cantidad)
+            _registrar_orden(cur, ubicacion, codigo, cantidad)
         else:
             # S y T descuentan del origen. En un traslado se bloquean las dos filas
             # siempre en el mismo orden (por código) para que dos traslados cruzados
@@ -340,11 +348,11 @@ def registrar_movimiento(datos: dict) -> dict:
             _sumar(cur, ubicacion, codigo, -cantidad)
             if tipo == "T":
                 if _stock_bloqueado(cur, destino, codigo) is None:
-                    capacidad = _entero(datos.get("capacidadNormal"), "capacidadNormal", errores, 1)
+                    ideal = _entero(datos.get("cantidadIdeal"), "cantidadIdeal", errores, 1)
                     if errores:
-                        raise ErrorNegocio({"capacidadNormal": "El destino no maneja este insumo todavía: "
-                                                               "indicá su capacidad normal allí."})
-                    _habilitar_en_ubicacion(cur, destino, codigo, capacidad)
+                        raise ErrorNegocio({"cantidadIdeal": "El destino no maneja este insumo todavía: "
+                                                             "indicá su cantidad ideal allí."})
+                    _habilitar_en_ubicacion(cur, destino, codigo, ideal)
                 _sumar(cur, destino, codigo, cantidad)
             cur.execute("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, codigoSuministro,"
                         " cantidadDespachada, codigoUbicacionDestino, empleadoDestinatario) VALUES (?, ?, ?, ?, ?)",
@@ -416,19 +424,19 @@ def filtros() -> list[dict]:
         {"id": "codigoProveedor", "tipo": "opcion", "etiqueta": "Proveedor",
          "opciones": [(p["id"], p["nombre"]) for p in cat["proveedores"]]},
         {"id": "critico", "tipo": "booleano", "etiqueta": "Stock crítico"},
-        {"id": "porcentaje", "tipo": "rango", "etiqueta": "% de capacidad"},
+        {"id": "porcentaje", "tipo": "rango", "etiqueta": "% de la cantidad ideal"},
         {"id": "costoUnitario", "tipo": "rango", "etiqueta": "Costo unitario (Q.)"},
     ]
 
 
 def _nivel_stock(df):
-    """% de capacidad por insumo (sumando todas sus ubicaciones). Los críticos salen en rojo."""
+    """% de la cantidad ideal por insumo (sumando todas sus ubicaciones). Los críticos salen en rojo."""
     pdf = (df.groupBy("suministro")
-           .agg((F.sum("existencia") * 100 / F.sum("capacidadNormal")).alias("pct"))
+           .agg((F.sum("existencia") * 100 / F.sum("cantidadIdeal")).alias("pct"))
            .toPandas())
-    return graficos.barras_h(pdf, "suministro", "pct", "Nivel de stock (% de la capacidad normal)",
+    return graficos.barras_h(pdf, "suministro", "pct", "Nivel de stock (% de la cantidad ideal)",
                              formato="{:.0f} %", resaltar=lambda f: f["pct"] < config.UMBRAL_STOCK_CRITICO * 100,
-                             eje="% de capacidad — en rojo: bajo el 15 %")
+                             eje="% de la cantidad ideal — en rojo: bajo el 15 %")
 
 
 def _salidas_por_semana(df):

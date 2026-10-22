@@ -18,7 +18,7 @@
   <section class="panel">
     <div class="panel-cab">
       <div><h2>Alerta de stock crítico</h2>
-        <span class="sub">Query 3 · <span class="mono">VW_Stock_Critico</span> · existencias bajo el 15 % de la capacidad normal</span></div>
+        <span class="sub">Query 3 · <span class="mono">VW_Stock_Critico</span> · existencias bajo el 15 % de la cantidad ideal</span></div>
     </div>
     <div class="panel-cuerpo" style="max-height:330px;overflow:auto"><ul class="lista" id="critico"></ul></div>
   </section>
@@ -80,7 +80,7 @@
       <div class="seccion-form solo-nuevo">Stock inicial</div>
       <div class="campo c2 solo-nuevo"><label for="i-ubi">Ubicación *</label><select id="i-ubi" name="codigoUbicacion"></select></div>
       <div class="campo c2 solo-nuevo"><label for="i-exist">Existencia inicial *</label><input type="number" min="0" step="1" id="i-exist" name="existencia" value="0"></div>
-      <div class="campo c2 solo-nuevo"><label for="i-cap">Capacidad normal *</label><input type="number" min="1" step="1" id="i-cap" name="capacidadNormal"></div>
+      <div class="campo c2 solo-nuevo"><label for="i-cap">Cantidad ideal *</label><input type="number" min="1" step="1" id="i-cap" name="cantidadIdeal"></div>
     </div></div>
     <div class="dlg-pie"><span class="error-general"></span>
       <button type="button" class="btn" data-cerrar>Cancelar</button>
@@ -106,8 +106,8 @@
       <div class="campo c6" id="m-dest-campo" hidden><label for="m-dest">Empleado que recibe</label>
         <select id="m-dest" name="empleadoDestinatario"></select>
         <span class="ayuda" id="m-dest-ayuda">Cualquier empleado activo.</span></div>
-      <div class="campo c6" id="m-cap-campo" hidden><label for="m-cap">Capacidad normal en esta ubicación</label>
-        <input type="number" min="1" step="1" id="m-cap" name="capacidadNormal">
+      <div class="campo c6" id="m-cap-campo" hidden><label for="m-cap">Cantidad ideal en esta ubicación</label>
+        <input type="number" min="1" step="1" id="m-cap" name="cantidadIdeal">
         <span class="ayuda" id="m-cap-ayuda">Es la primera entrada de este insumo en esta ubicación.</span></div>
       <div class="c6 id-previo" id="m-actual">—</div>
     </div></div>
@@ -158,7 +158,7 @@ async function cargarTodo() {
 
   $("#critico").innerHTML = critico.map((c) => `
     <li class="alerta-stock"><span class="grow"><b>${esc(c.suministro)} <span class="mono" style="color:var(--muted);font-weight:500">${esc(c.codigoSuministro)}</span></b>
-      <small>${esc(c.ubicacion)} · <strong style="color:var(--alert)">${c.existencia}</strong> de ${c.capacidadNormal} (${c.porcentaje} %)</small>
+      <small>${esc(c.ubicacion)} · <strong style="color:var(--alert)">${c.existencia}</strong> de ${c.cantidadIdeal} (${c.porcentaje} %)</small>
       <small style="display:block">${esc(c.proveedor)} · ${esc(c.contacto || "")} · <span class="mono">${esc(c.telefono)}</span>${c.correo ? ` · <a href="mailto:${esc(c.correo)}">${esc(c.correo)}</a>` : ""}</small></span>
       <button type="button" class="btn btn-mini" data-reponer="${esc(c.codigoSuministro)}" data-ubi="${esc(c.ubicacion)}">Reponer</button></li>`).join("")
     || `<li class="vacio" style="justify-content:center">Ningún insumo bajo el 15 %.</li>`;
@@ -258,13 +258,13 @@ function actualizarStockActual() {
   $("#m-dest-ayuda").textContent = tipo === "T"
     ? "Si lo dejás vacío, lo recibe el encargado del almacén destino." : "Cualquier empleado activo, sin importar el puesto.";
   $("#m-dest").options[0].textContent = tipo === "T" ? "Encargado del destino" : "Elegí…";
-  // Capacidad normal: solo cuando el insumo llega por primera vez a una ubicación.
+  // Cantidad ideal: solo se pide cuando el insumo llega por primera vez a una ubicación.
   const necesitaCap = (tipo === "E" && sum && ubi && !fila) || (tipo === "T" && sum && destino && !stockDe(sum, destino));
   $("#m-cap-campo").hidden = !necesitaCap;
   $("#m-cap-ayuda").textContent = tipo === "T" ? "El almacén destino todavía no maneja este insumo."
                                                : "Es la primera entrada de este insumo en esta ubicación.";
   $("#m-actual").innerHTML = !sum || !ubi ? "Elegí insumo y ubicación." : fila
-    ? `Existencia en el origen: <b>${fila.existencia}</b> de ${fila.capacidadNormal} (${fila.porcentaje} %)`
+    ? `Existencia en el origen: <b>${fila.existencia}</b> de ${fila.cantidadIdeal} (${fila.porcentaje} %)`
     : tipo === "E" ? "Este insumo todavía no tiene stock en esta ubicación."
                    : "<b>Sin stock en esta ubicación</b>: no se puede despachar desde acá.";
 }
