@@ -240,6 +240,10 @@ def agendar_cita(numero: str, datos: dict) -> dict:
         hora = dt.time.fromisoformat(datos.get("hora") or "")
     except ValueError:
         errores["fecha"] = "Fecha y hora obligatorias."
+    else:
+        # Misma regla que CK_cita_hora en SQL Server: horario de consulta externa.
+        if not dt.time(7, 0) <= hora <= dt.time(19, 0):
+            errores["hora"] = "Las citas son de 07:00 a 19:00."
     if errores:
         raise ErrorNegocio(errores)
     choque = db.consultar_uno("SELECT numeroCita FROM informeCita WHERE numeroEmpleado = ? AND fecha = ? AND hora = ?",

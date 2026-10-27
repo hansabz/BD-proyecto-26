@@ -148,8 +148,9 @@ def cargar_datos(cur):
             "INSERT INTO empleado (numeroEmpleado, nombres, apellidos, NSS, codigoPuesto, codigoEspecialidad,"
             " codigoTurno, fechaContratacion, activo, fechaBaja) VALUES (?,?,?,?,?,?,?,?,?,?)",
             num, nom, ape, nss or nss_aleatorio(usados), pue, esp, tur, contratacion, activo, baja)
-        for s in salas:
-            cur.execute("INSERT INTO asignacionSala VALUES (?,?)", s, num)
+        for s in salas:   # trabaja en esa sala desde que lo contrataron
+            cur.execute("INSERT INTO asignacionSala (codigoSala, numeroEmpleado, fechaAsignacion) VALUES (?,?,?)",
+                        s, num, contratacion)
 
     # Camas: C-001.. por sala, todas disponibles al inicio (codigoEstado bit: 0 libre, 1 ocupada)
     camas = []

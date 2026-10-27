@@ -194,7 +194,8 @@ def crear(datos: dict) -> dict:
                     numero, d["nombres"], d["apellidos"], d["NSS"], d["codigoPuesto"],
                     d["codigoEspecialidad"], d["codigoTurno"], d["fechaContratacion"])
                 for sala in d["salas"]:
-                    cur.execute("INSERT INTO asignacionSala VALUES (?, ?)", sala, numero)
+                    # fechaAsignacion no se manda: la pone el DEFAULT de SQL Server (hoy).
+                    cur.execute("INSERT INTO asignacionSala (codigoSala, numeroEmpleado) VALUES (?, ?)", sala, numero)
         except pyodbc.IntegrityError as exc:
             # Red de seguridad: si aun así se coló un NSS repetido, lo frena la
             # restricción UNIQUE de SQL Server y lo traducimos a un mensaje claro.
@@ -205,7 +206,11 @@ def crear(datos: dict) -> dict:
 
 
 def actualizar(numero: str, datos: dict) -> dict:
-    """Modificación. El ID no cambia; las salas se reemplazan (DELETE + INSERT) en la misma transacción."""
+    """
+    Modificación. El ID no cambia. Las salas se sincronizan en la misma transacción:
+    se quitan las que se desmarcaron y se agregan las nuevas; las que siguen
+    conservan su fechaAsignacion original.
+    """
     actual = obtener(numero)
     d = _validar(datos, numero)
     if d["codigoPuesto"] != actual["codigoPuesto"]:
@@ -219,9 +224,12 @@ def actualizar(numero: str, datos: dict) -> dict:
             " fechaContratacion=? WHERE numeroEmpleado = ?",
             d["nombres"], d["apellidos"], d["NSS"], d["codigoPuesto"], d["codigoEspecialidad"], d["codigoTurno"],
             d["fechaContratacion"], numero)
-        cur.execute("DELETE FROM asignacionSala WHERE numeroEmpleado = ?", numero)
-        for sala in d["salas"]:
-            cur.execute("INSERT INTO asignacionSala VALUES (?, ?)", sala, numero)
+        actuales = {fila[0] for fila in cur.execute(
+            "SELECT codigoSala FROM asignacionSala WHERE numeroEmpleado = ?", numero).fetchall()}
+        for sala in actuales - set(d["salas"]):          # salas que se desmarcaron
+            cur.execute("DELETE FROM asignacionSala WHERE codigoSala = ? AND numeroEmpleado = ?", sala, numero)
+        for sala in set(d["salas"]) - actuales:          # salas nuevas (fecha = DEFAULT hoy)
+            cur.execute("INSERT INTO asignacionSala (codigoSala, numeroEmpleado) VALUES (?, ?)", sala, numero)
     return {"mensaje": f"Empleado {numero} actualizado."}
 
 
