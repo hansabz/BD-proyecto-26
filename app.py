@@ -320,6 +320,11 @@ def inv_proveedor_actualizar(codigo):
     return jsonify(inventario.actualizar_proveedor(codigo, request.get_json() or {}))
 
 
+@app.delete("/api/inventario/proveedores/<codigo>")
+def inv_proveedor_eliminar(codigo):
+    return jsonify(inventario.eliminar_proveedor(codigo))
+
+
 # ── Telemetría · Big Data (Fase II) ──────────────────────────────────
 @app.post("/api/telemetria/generar")
 def tel_generar():

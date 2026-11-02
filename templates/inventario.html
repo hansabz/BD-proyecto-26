@@ -75,8 +75,10 @@
         <span class="ayuda">Define el prefijo del ID (Q, F o M).</span></div>
       <div class="campo c4"><label for="i-desc">Descripción</label><input id="i-desc" name="descripcion" maxlength="50" placeholder="Estériles, Látex, Talla M"></div>
       <div class="campo c2"><label for="i-costo">Costo unitario (Q.) *</label><input type="number" step="0.01" min="0.01" id="i-costo" name="costoUnitario"></div>
-      <div class="campo c6"><label for="i-prov">Proveedor logístico *</label><select id="i-prov" name="codigoProveedor"></select>
-        <span class="ayuda">Obligatorio. ¿No está? Registralo en la pestaña Proveedores.</span></div>
+      <div class="campo c6"><label for="i-prov">Proveedor logístico *</label>
+        <div style="display:flex;gap:8px"><select id="i-prov" name="codigoProveedor" style="flex:1"></select>
+          <button type="button" class="btn" id="btn-proveedor-inline">+ Nuevo proveedor</button></div>
+        <span class="ayuda" id="i-prov-ayuda">Obligatorio. ¿No está en la lista? Registralo acá mismo con “+ Nuevo proveedor”.</span></div>
       <div class="seccion-form solo-nuevo">Stock inicial</div>
       <div class="campo c2 solo-nuevo"><label for="i-ubi">Ubicación *</label><select id="i-ubi" name="codigoUbicacion"></select></div>
       <div class="campo c2 solo-nuevo"><label for="i-exist">Existencia inicial *</label><input type="number" min="0" step="1" id="i-exist" name="existencia" value="0"></div>
@@ -180,11 +182,15 @@ async function cargarTodo() {
       <td class="mono">${esc(p.id)}</td><td><b>${esc(p.nombre)}</b></td><td>${esc(p.contacto || "—")}</td>
       <td class="mono">${esc(p.telefono)}</td><td>${p.correo ? `<a href="mailto:${esc(p.correo)}">${esc(p.correo)}</a>` : "—"}</td>
       <td class="num">${p.insumos}</td>
-      <td class="acciones-fila"><button type="button" class="btn btn-mini" data-proveedor="${p.id}">Editar</button></td></tr>`).join("");
+      <td class="acciones-fila"><button type="button" class="btn btn-mini" data-proveedor="${p.id}">Editar</button>
+        <button type="button" class="btn btn-mini btn-peligro" data-borrar-proveedor="${p.id}" data-insumos="${p.insumos}">Eliminar</button></td></tr>`).join("")
+    || `<tr><td colspan="7" class="vacio">Todavía no hay proveedores: registrá el primero con “Nuevo proveedor”.</td></tr>`;
 
-  const sel = $("#ubicacion-informe"), previa = sel.value;
-  opciones(sel, cat.ubicaciones, { vacio: null });
-  if (previa) sel.value = previa;
+  // Recargar las listas desplegables borra lo elegido: se guarda y se restaura, así un
+  // formulario abierto no pierde lo que el usuario ya había seleccionado.
+  const ids = ["ubicacion-informe", "i-tipo", "i-prov", "i-ubi", "m-sum", "m-ubi", "m-destino", "m-dest"];
+  const elegidos = Object.fromEntries(ids.map((id) => [id, document.getElementById(id).value]));
+  opciones($("#ubicacion-informe"), cat.ubicaciones, { vacio: null });
   opciones($("#i-tipo"), cat.tipos);
   opciones($("#i-prov"), cat.proveedores);
   opciones($("#i-ubi"), cat.ubicaciones);
@@ -192,6 +198,10 @@ async function cargarTodo() {
   opciones($("#m-ubi"), cat.ubicaciones);
   opciones($("#m-destino"), cat.ubicaciones);
   opciones($("#m-dest"), cat.empleados, { texto: (e) => `${e.nombre} · ${e.puesto} (${e.id})` });
+  ids.forEach((id) => { if (elegidos[id]) document.getElementById(id).value = elegidos[id]; });
+  $("#i-prov-ayuda").textContent = cat.proveedores.length
+    ? "Obligatorio. ¿No está en la lista? Registralo acá mismo con “+ Nuevo proveedor”."
+    : "Todavía no hay proveedores registrados: creá el primero con “+ Nuevo proveedor”.";
   cargarFigura5();
 }
 
@@ -323,16 +333,33 @@ function abrirProveedor(id = null) {
   abrirDialogo("dlg-proveedor");
 }
 $("#btn-proveedor").addEventListener("click", () => abrirProveedor());
+// Desde el formulario de insumo: se abre encima, y al guardar queda elegido en la lista.
+$("#btn-proveedor-inline").addEventListener("click", () => abrirProveedor());
 $("#tabla-proveedores").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-proveedor]");
-  if (b) abrirProveedor(b.dataset.proveedor);
+  const ed = e.target.closest("[data-proveedor]"), bo = e.target.closest("[data-borrar-proveedor]");
+  if (ed) abrirProveedor(ed.dataset.proveedor);
+  if (bo) {
+    const id = bo.dataset.borrarProveedor;
+    $("#conf-titulo").textContent = `Eliminar proveedor ${id}`;
+    $("#conf-texto").textContent = Number(bo.dataset.insumos)
+      ? `Provee ${bo.dataset.insumos} insumo(s): primero asigná esos insumos a otro proveedor.`
+      : "El proveedor no tiene insumos asociados y se puede eliminar.";
+    abrirDialogo("dlg-confirmar");
+    $("#conf-ok").onclick = async (ev) => {
+      const r = await conBoton(ev.currentTarget, () => API.del(`/api/inventario/proveedores/${id}`));
+      if (r) { toast(r.mensaje); $("#dlg-confirmar").close(); await cargarTodo(); }
+    };
+  }
 });
 formProv.addEventListener("submit", async (e) => {
   e.preventDefault();
   const r = await Form.enviar(formProv, (d) => editandoProveedor
     ? API.put(`/api/inventario/proveedores/${editandoProveedor}`, d)
     : API.post("/api/inventario/proveedores", d));
-  if (r) { $("#dlg-proveedor").close(); refrescar(); }
+  if (!r) return;
+  $("#dlg-proveedor").close();
+  await cargarTodo();                     // la lista de proveedores ya trae el nuevo
+  if (r.codigoProveedor && $("#dlg-insumo").open) $("#i-prov").value = r.codigoProveedor;
 });
 
 // Tabla en vivo de existencias. Botones por fila: entrada, salida, traslado, editar.

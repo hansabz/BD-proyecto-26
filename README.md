@@ -5,6 +5,7 @@ para el Hospital W con base de datos transaccional en **SQL Server** y procesami
 Big Data con **PySpark**. La interfaz es HTML/CSS y las gráficas salen de **pandas + matplotlib**.
 
 > 📘 Manual de uso y explicación del funcionamiento: [`docs/Manual_HospitalW.docx`](docs/Manual_HospitalW.docx)
+> 🛠️ Manual técnico (botón → código, Colab, ejercicios con solución): [`docs/Manual_Tecnico_HospitalW.docx`](docs/Manual_Tecnico_HospitalW.docx)
 > 🎓 Guía de estudio para la revisión (cómo funciona todo, archivo por archivo): [`docs/GUIA_DE_ESTUDIO.md`](docs/GUIA_DE_ESTUDIO.md)
 > ✅ Pruebas automáticas (base desechable, no toca la real): `.\.venv\Scripts\python pruebas_sistema.py`
 
@@ -94,7 +95,7 @@ BD-proyecto-26/
 ├── app.py                 Servidor Flask: TODAS las rutas (páginas y API). Empezá a leer por acá.
 ├── setup_db.py            Crea la base, ejecuta sql/, carga datos de prueba y genera los logs.
 ├── exportar_datos_sql.py  Exporta los datos de la base a sql/03_datos_prueba.sql.
-├── pruebas_sistema.py     41 pruebas automáticas sobre una base desechable (hospitalProyecto_pruebas).
+├── pruebas_sistema.py     46 pruebas automáticas sobre una base desechable (hospitalProyecto_pruebas).
 ├── sql/
 │   ├── 00_script_original_comentado.sql  Script original del grupo, explicado.
 │   ├── 01_esquema.sql     Tablas; cada una cierra con su CHECK y DEFAULT. Cambios marcados [AJUSTE].
@@ -103,6 +104,7 @@ BD-proyecto-26/
 │   └── 04_prueba_indices.sql  Prueba de rendimiento del índice agrupado (correr en SSMS).
 ├── docs/
 │   ├── Manual_HospitalW.docx  Manual de uso y explicación del funcionamiento.
+│   ├── Manual_Tecnico_HospitalW.docx  Manual técnico + ejercicios de práctica con solución.
 │   ├── GUIA_DE_ESTUDIO.md Explicación a fondo para la revisión (+ preguntas probables).
 │   └── INDICES.md         Estrategia de índices y resultados de la prueba.
 ├── core/                  Piezas compartidas por todas las áreas

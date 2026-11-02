@@ -408,6 +408,19 @@ def actualizar_proveedor(codigo: str, datos: dict) -> dict:
     return {"mensaje": f"Proveedor {codigo} actualizado."}
 
 
+def eliminar_proveedor(codigo: str) -> dict:
+    """Solo se borra un proveedor sin insumos: la FK de suministro lo impediría igual."""
+    with db.transaccion() as cur:
+        insumos = cur.execute("SELECT COUNT(*) FROM suministro WHERE codigoProveedor = ?", codigo).fetchone()[0]
+        if insumos:
+            raise ErrorNegocio(f"{codigo} provee {insumos} insumo(s): asigná esos insumos a otro proveedor "
+                               "antes de eliminarlo.")
+        cur.execute("DELETE FROM proveedor WHERE codigoProveedor = ?", codigo)
+        if cur.rowcount == 0:
+            raise ErrorNegocio(f"No existe el proveedor {codigo}.")
+    return {"mensaje": f"Proveedor {codigo} eliminado."}
+
+
 # ── PySpark: dataset, filtros y gráficas ─────────────────────────────
 def dataset():
     return leer_sql(BASE_SQL)

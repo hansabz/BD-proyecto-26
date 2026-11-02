@@ -132,6 +132,57 @@ def ejecutar(c, db):
         for idx in ("CIX_informeCita_paciente_fecha", "CIX_entradaSuministro_fecha", "CIX_informeSuministroSalida_fecha"):
             assert idx in nombres, f"falta {idx}"
 
+    # Diagrama entidad-relación del grupo: tabla -> columnas, y relaciones (hija -> padre).
+    DIAGRAMA = {
+        "proveedor": ["codigoProveedor", "nombre", "contacto", "telefono", "correo"],
+        "suministro": ["codigoSuministro", "nombre", "descripcion", "costoUnitario", "codigoProveedor"],
+        "informeSuministroIngreso": ["codigoUbicacion", "codigoSuministro", "cantidadOrdenada"],
+        "suministroUbicacion": ["codigoUbicacion", "codigoSuministro", "cantidadDisponible"],
+        "ubicacion": ["codigoUbicacion", "nombre", "empleadoEncargado"],
+        "informeSuministroSalida": ["codigoUbicacionFuente", "codigoSuministro", "cantidadDespachada",
+                                    "codigoUbicacionDestino"],
+        "especialidad": ["codigoEspecialidad", "nombre"],
+        "puesto": ["codigoPuesto", "nombre", "salario"],
+        "turno": ["codigoTurno", "nombre"],
+        "empleado": ["numeroEmpleado", "nombres", "apellidos", "NSS", "codigoEspecialidad", "codigoPuesto",
+                     "codigoTurno", "fechaContratacion"],
+        "informeCita": ["numeroCita", "numeroPaciente", "fecha", "hora", "numeroEmpleado", "codigoEspecialidad",
+                        "codigoSala"],
+        "asignacionSala": ["codigoSala", "numeroEmpleado"],
+        "sala": ["codigoSala", "nombre", "camasDisponibles"],
+        "paciente": ["numeroPaciente", "nombres", "apellidos", "fechaNac", "telefono", "direccion"],
+        "cama": ["numeroCama", "codigoSala", "codigoEstado"],
+        "asignacionCama": ["numeroIngreso", "numeroPaciente", "numeroCama", "codigoSala", "fechaIngreso",
+                           "fechaSalida", "codigoEstado"],
+        "registroIngreso": ["numeroIngreso", "numeroPaciente", "fechaReg", "nombreFam", "parentescoFam",
+                            "telefonoFam", "medicoRef", "clinicaRef"],
+    }
+    RELACIONES = [("suministro", "proveedor"), ("informeSuministroIngreso", "suministro"),
+                  ("informeSuministroIngreso", "ubicacion"), ("suministroUbicacion", "informeSuministroIngreso"),
+                  ("informeSuministroSalida", "suministroUbicacion"), ("informeSuministroSalida", "ubicacion"),
+                  ("ubicacion", "empleado"), ("empleado", "especialidad"), ("empleado", "puesto"),
+                  ("empleado", "turno"), ("informeCita", "especialidad"), ("informeCita", "empleado"),
+                  ("informeCita", "sala"), ("informeCita", "paciente"), ("asignacionSala", "empleado"),
+                  ("asignacionSala", "sala"), ("cama", "sala"), ("asignacionCama", "cama"),
+                  ("asignacionCama", "paciente"), ("asignacionCama", "registroIngreso"),
+                  ("registroIngreso", "paciente")]
+
+    @prueba(G, "Coincide con el diagrama ER: todas sus tablas y columnas existen")
+    def _():
+        columnas = {(f["t"], f["c"]) for f in db.consultar(
+            "SELECT OBJECT_NAME(object_id) AS t, name AS c FROM sys.columns WHERE OBJECTPROPERTY(object_id, 'IsUserTable') = 1")}
+        faltan = [f"{t}.{c}" for t, cols in DIAGRAMA.items() for c in cols if (t, c) not in columnas]
+        assert not faltan, f"faltan: {faltan}"
+        return f"{len(DIAGRAMA)} tablas, {sum(map(len, DIAGRAMA.values()))} columnas"
+
+    @prueba(G, "Coincide con el diagrama ER: todas sus relaciones son FOREIGN KEY")
+    def _():
+        fks = {(f["hija"], f["padre"]) for f in db.consultar(
+            "SELECT OBJECT_NAME(parent_object_id) AS hija, OBJECT_NAME(referenced_object_id) AS padre FROM sys.foreign_keys")}
+        faltan = [r for r in RELACIONES if r not in fks]
+        assert not faltan, f"faltan: {faltan}"
+        return f"{len(RELACIONES)} relaciones"
+
     # ═══ 2. QUERIES SQL ═════════════════════════════════════════════════
     G = "2. Queries SQL (Fase I)"
 
@@ -336,6 +387,39 @@ def ejecutar(c, db):
         stock = {f["codigoUbicacion"]: f["cantidadDisponible"] for f in db.consultar(
             "SELECT codigoUbicacion, cantidadDisponible FROM suministroUbicacion WHERE codigoSuministro = ?", (insumo["cod"],))}
         assert stock == {"U01": 40, "U02": 5}, stock
+
+    proveedor = {}
+
+    @prueba(G, "Proveedor nuevo desde cero (PR###) y usarlo en un insumo nuevo")
+    def _():
+        s, r = post("/api/inventario/proveedores", {"nombre": "Proveedor Nuevo", "contacto": "Ana Ruiz",
+                                                    "telefono": "+502 2200-1100", "correo": "ventas@nuevo.gt"})
+        assert s == 201 and r["codigoProveedor"].startswith("PR"), r
+        proveedor["cod"] = r["codigoProveedor"]
+        s, r = post("/api/inventario/suministros", {"nombre": "Gasas", "tipo": "M", "costoUnitario": "2.5",
+                                                   "codigoProveedor": proveedor["cod"], "codigoUbicacion": "U01",
+                                                   "existencia": "30", "cantidadIdeal": "100"})
+        assert s == 201, r
+        proveedor["insumo"] = r["codigoSuministro"]
+        return proveedor["cod"]
+
+    @prueba(G, "Proveedor sin teléfono o con nombre repetido rechazado")
+    def _():
+        s, r = post("/api/inventario/proveedores", {"nombre": "Otro"})
+        assert s == 400 and "telefono" in r.get("campos", {}), r
+        s, r = post("/api/inventario/proveedores", {"nombre": "Proveedor Nuevo", "telefono": "2200-1100"})
+        assert s == 400 and "nombre" in r.get("campos", {}), r
+
+    @prueba(G, "Un proveedor con insumos no se elimina; sin insumos, sí")
+    def _():
+        r = c.delete(f"/api/inventario/proveedores/{proveedor['cod']}")
+        assert r.status_code == 400, r.get_json()
+        assert c.delete(f"/api/inventario/suministros/{proveedor['insumo']}").status_code == 400  # tiene stock
+        with db.transaccion() as cur:   # se lo pasa a otro proveedor, como haría el usuario al editarlo
+            cur.execute("UPDATE suministro SET codigoProveedor = 'PR001' WHERE codigoSuministro = ?", proveedor["insumo"])
+        r = c.delete(f"/api/inventario/proveedores/{proveedor['cod']}")
+        assert r.status_code == 200, r.get_json()
+        assert not db.escalar("SELECT COUNT(*) FROM proveedor WHERE codigoProveedor = ?", (proveedor["cod"],))
 
     # ═══ 7. PANTALLAS, FILTROS Y GRÁFICAS ═══════════════════════════════
     G = "7. Pantallas y gráficas"

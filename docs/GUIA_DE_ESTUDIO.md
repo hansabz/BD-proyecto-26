@@ -291,7 +291,7 @@ y *Entorno de ejecución → Ejecutar todas* (1 a 2 minutos).
 | `app.py` | El servidor Flask. Define **todas las rutas**: las páginas (`/personal`...) y la API (`/api/...`). Es el "recepcionista": recibe el pedido y llama a la función del área que corresponde. |
 | `setup_db.py` | Crea la base `hospitalProyecto`, ejecuta `01` y `02`, carga datos de prueba, genera los logs y calcula el riesgo. `--reset` **borra** la base anterior. |
 | `exportar_datos_sql.py` | Exporta los datos de la base a `sql/03_datos_prueba.sql`. |
-| `pruebas_sistema.py` | 41 pruebas automáticas sobre una base desechable. |
+| `pruebas_sistema.py` | 46 pruebas automáticas sobre una base desechable. |
 | `requirements.txt` | Las librerías de Python que hay que instalar. |
 
 ### `core/` — piezas compartidas
@@ -420,5 +420,5 @@ calcula el siguiente número con `regexp_extract` y `max`.
 .\.venv\Scripts\python pruebas_sistema.py
 ```
 
-Crea una base desechable, ejecuta **41 pruebas** (base de datos, queries, RF1–RF4, pantallas,
+Crea una base desechable, ejecuta **46 pruebas** (base de datos, queries, RF1–RF4, pantallas,
 gráficas y Big Data) y la borra al terminar. Al final muestra cuántas pasaron. No toca la base real.
