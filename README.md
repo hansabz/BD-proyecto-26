@@ -88,6 +88,30 @@ Subir `bigdata/HospitalW_BigData.ipynb` a Google Colab (*Archivo → Subir noteb
 - **`setup_db.py --reset` borra la base** y la vuelve a crear. No usarlo si cargaron datos a mano.
 - El aviso `"CRUD" no se reconoce como un comando` en la consola es inofensivo.
 
+## Levantar el programa (sin comandos)
+
+Doble clic en **`iniciar_programa.bat`** (en la carpeta del proyecto). Se abre una ventana negra
+con el servidor y, a los pocos segundos, el navegador en http://127.0.0.1:5000.
+Para apagarlo, cerrá esa ventana. Requiere haber hecho una vez la instalación de «Cómo empezar».
+
+## Publicarlo en internet (Render + Azure SQL)
+
+Render no puede ver el SQL Server de tu computadora, así que la base va a **Azure SQL** (SQL Server
+en la nube) y el programa a **Render** (con el `Dockerfile` de este repositorio).
+
+1. **Azure SQL**: crear una base gratuita llamada `hospitalProyecto` (intercalación
+   `Modern_Spanish_CI_AS`) y, en *Redes*, permitir el acceso desde tu IP.
+2. **Copiar los datos**: `.\.venv\Scripts\python cargar_azure.py` — pide servidor, usuario y
+   contraseña de Azure, crea las tablas y copia tu base local.
+3. **Render**: *New → Blueprint* → elegir este repositorio (usa `render.yaml`) y completar
+   `HOSPITAL_DB_SERVER`, `HOSPITAL_DB_USER` y `HOSPITAL_DB_PASSWORD`.
+4. En Azure, permitir también las IP de salida de Render (panel del servicio → *Connect → Outbound*).
+
+En Render gratis (512 MB) Spark corre con 256 MB (`HOSPITAL_SPARK_MEMORIA`) y los IDs nuevos los
+calcula SQL Server (`HOSPITAL_IDS_CON_SPARK=0`), para que dar de alta registros no dependa de la
+memoria. En tu PC todo sigue igual (IDs con PySpark). El servicio gratis se duerme tras 15 minutos
+sin visitas: la primera carga después tarda alrededor de un minuto.
+
 ## Mapa del código
 
 ```
@@ -95,6 +119,9 @@ BD-proyecto-26/
 ├── app.py                 Servidor Flask: TODAS las rutas (páginas y API). Empezá a leer por acá.
 ├── setup_db.py            Crea la base, ejecuta sql/, carga datos de prueba y genera los logs.
 ├── exportar_datos_sql.py  Exporta los datos de la base a sql/03_datos_prueba.sql.
+├── iniciar_programa.bat   Doble clic: levanta el programa y abre el navegador.
+├── cargar_azure.py        Copia la base local a Azure SQL (para publicarlo en Render).
+├── Dockerfile, render.yaml  Publicación en Render.
 ├── pruebas_sistema.py     46 pruebas automáticas sobre una base desechable (hospitalProyecto_pruebas).
 ├── sql/
 │   ├── 00_script_original_comentado.sql  Script original del grupo, explicado.

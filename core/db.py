@@ -56,9 +56,11 @@ def cadena_conexion(database: str | None = None) -> str:
         f"DRIVER={{{_driver()}}}",
         f"SERVER={config.DB_SERVER}",
         f"DATABASE={database or config.DB_NAME}",
-        "TrustServerCertificate=yes",   # SQL Express local usa un certificado propio
-        "Encrypt=no",
     ]
+    if config.DB_ENCRYPT:              # nube (Azure SQL): cifrado y certificado verificado
+        partes += ["Encrypt=yes", "TrustServerCertificate=no"]
+    else:                              # SQL Express local: usa un certificado propio
+        partes += ["Encrypt=no", "TrustServerCertificate=yes"]
     if config.DB_USER:
         partes += [f"UID={config.DB_USER}", f"PWD={config.DB_PASSWORD}"]
     else:
@@ -68,7 +70,7 @@ def cadena_conexion(database: str | None = None) -> str:
 
 def conectar(database: str | None = None, autocommit: bool = False):
     # autocommit=False: los cambios NO se guardan hasta llamar conn.commit().
-    return pyodbc.connect(cadena_conexion(database), autocommit=autocommit, timeout=5)
+    return pyodbc.connect(cadena_conexion(database), autocommit=autocommit, timeout=config.DB_TIMEOUT)
 
 
 @contextmanager

@@ -39,7 +39,7 @@ def obtener_spark() -> SparkSession:
     global _spark
     with _lock:
         if _spark is None:
-            _spark = (
+            constructor = (
                 SparkSession.builder
                 .master("local[2]")                                   # Spark local, 2 núcleos
                 .appName("HospitalW-Dashboard")
@@ -47,9 +47,16 @@ def obtener_spark() -> SparkSession:
                 .config("spark.sql.shuffle.partitions", "4")          # pocos datos -> pocas particiones (más rápido)
                 .config("spark.sql.execution.arrow.pyspark.enabled", "false")
                 .config("spark.sql.session.timeZone", "America/Guatemala")
-                .config("spark.driver.memory", "1g")
-                .getOrCreate()
+                .config("spark.driver.memory", config.SPARK_MEMORIA)                # 1g en la PC, 256m en Render
+                # Recolector de basura simple y pilas chicas: la JVM ocupa menos memoria fija.
+                .config("spark.driver.extraJavaOptions", "-XX:+UseSerialGC -XX:MaxMetaspaceSize=160m -Xss512k")
             )
+            if config.SPARK_MEMORIA.lower().endswith("m") and int(config.SPARK_MEMORIA[:-1]) < 450:
+                # Spark se niega a arrancar con menos de ~450 MB de heap. Con nuestros datos
+                # (cientos de filas, 6,000 lecturas) alcanza con menos: spark.testing.memory
+                # le indica cuánta memoria suponer al hacer ese control (512 MB).
+                constructor = constructor.config("spark.testing.memory", str(512 * 1024 * 1024))
+            _spark = constructor.getOrCreate()
             _spark.sparkContext.setLogLevel("ERROR")                 # menos ruido en la consola
         return _spark
 

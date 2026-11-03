@@ -1,0 +1,14 @@
+# Lo que NO se copia a la imagen de Docker (Render).
+.venv/
+venv/
+.git/
+__pycache__/
+*.pyc
+docs/
+bigdata/datos/logs_refinados.parquet/
+spark-warehouse/
+metastore_db/
+derby.log
+.env
+~$*
+iniciar_programa.bat

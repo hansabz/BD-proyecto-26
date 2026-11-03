@@ -31,6 +31,7 @@ import threading
 
 from pyspark.sql import functions as F
 
+from core import config, db
 from core.db import ErrorNegocio
 from core.spark import leer_sql
 
@@ -44,12 +45,28 @@ LOCK_IDS = threading.RLock()
 _TILDES, _SIN_TILDES = "áéíóúÁÉÍÓÚ", "aeiouAEIOU"
 
 
+def _siguiente_numero_sql(tabla: str, columna: str, patron: str, inicio: int) -> int:
+    """
+    Mismo cálculo que _siguiente_numero pero en SQL Server, sin Spark. Solo se usa
+    si HOSPITAL_IDS_CON_SPARK=0 (Render gratis, poca memoria). El patrón es
+    "^PREFIJO(\\d+)$": el prefijo es lo que está antes del paréntesis.
+    """
+    prefijo = patron[1:patron.index("(")]
+    maximo = db.escalar(
+        f"SELECT MAX(CAST(SUBSTRING({columna}, ?, 20) AS int)) FROM {tabla}"
+        f" WHERE {columna} LIKE ? AND ISNUMERIC(SUBSTRING({columna}, ?, 20)) = 1",
+        (len(prefijo) + 1, prefijo + "[0-9]%", len(prefijo) + 1))
+    return inicio if maximo is None else maximo + 1
+
+
 def _siguiente_numero(tabla: str, columna: str, patron: str, inicio: int) -> int:
     """
     Busca en `tabla.columna` los IDs que cumplen `patron` y devuelve max + 1.
     El patrón tiene UN grupo de captura (\\d+) con la parte numérica.
     Si todavía no hay ninguno, devuelve `inicio` (ej. 1001 para empleados).
     """
+    if not config.IDS_CON_SPARK:
+        return _siguiente_numero_sql(tabla, columna, patron, inicio)
     df = leer_sql(f"SELECT {columna} AS id FROM {tabla}")
     maximo = (
         df.filter(F.col("id").rlike(patron))                  # solo IDs con este prefijo
@@ -69,6 +86,11 @@ def extraer_rol(codigo_puesto: str) -> str:
     Lee el nombre del puesto en Spark y lo normaliza a una sola palabra:
     "  Médico " -> "medico", "Enfermera Jefe" -> "enfermera".
     """
+    if not config.IDS_CON_SPARK:      # misma normalización, en Python puro (ver config.IDS_CON_SPARK)
+        nombre = db.escalar("SELECT nombre FROM puesto WHERE codigoPuesto = ?", (codigo_puesto,))
+        if nombre is None:
+            raise ErrorNegocio(f"El puesto '{codigo_puesto}' no existe en el catálogo.")
+        return nombre.strip().lower().translate(str.maketrans(_TILDES, _SIN_TILDES)).split()[0]
     puestos = leer_sql("SELECT codigoPuesto, nombre FROM puesto")
     fila = (
         puestos.filter(F.col("codigoPuesto") == codigo_puesto)

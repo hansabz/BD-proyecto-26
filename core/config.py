@@ -25,6 +25,10 @@ DB_NAME = os.getenv("HOSPITAL_DB_NAME", "hospitalProyecto")
 # (la misma con la que entrás a SQL Server Management Studio).
 DB_USER = os.getenv("HOSPITAL_DB_USER", "")
 DB_PASSWORD = os.getenv("HOSPITAL_DB_PASSWORD", "")
+# Conexión cifrada: obligatoria en la nube (Azure SQL). En el SQL Express local no hace falta.
+DB_ENCRYPT = os.getenv("HOSPITAL_DB_ENCRYPT", "no").lower() in ("1", "si", "sí", "yes", "true")
+# Segundos de espera al conectar. La base gratis de Azure se "duerme" y tarda en despertar.
+DB_TIMEOUT = int(os.getenv("HOSPITAL_DB_TIMEOUT", "5"))
 
 # ── Spark ─────────────────────────────────────────────────────────────
 # PySpark es una librería de Python que por dentro arranca un proceso de
@@ -59,6 +63,12 @@ def preparar_entorno_spark() -> None:
         if especificacion and especificacion.origin:
             os.environ["SPARK_HOME"] = str(Path(especificacion.origin).parent)
 
+
+# Memoria de la JVM de Spark. En la PC sobra (1g); en Render gratis (512 MB en total) se baja a 256m.
+SPARK_MEMORIA = os.getenv("HOSPITAL_SPARK_MEMORIA", "1g")
+# IDs con PySpark (lo que pide el proyecto). En Render gratis se puede apagar (0) para que dar de
+# alta registros no dependa de que Spark entre en memoria: entonces los calcula SQL Server.
+IDS_CON_SPARK = os.getenv("HOSPITAL_IDS_CON_SPARK", "1") != "0"
 
 # Cada cuántos milisegundos el navegador pregunta "¿cambió algo?" para que la
 # tabla sea "en tiempo real" (ver /api/<area>/firma en app.py).

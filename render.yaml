@@ -1,0 +1,27 @@
+# Blueprint de Render: describe el servicio web para crearlo desde el panel
+# (New -> Blueprint -> elegir este repositorio).
+# Los valores marcados "sync: false" (servidor, usuario y contraseña de Azure SQL)
+# NO se escriben acá: Render los pide al crear el servicio y quedan guardados allá.
+services:
+  - type: web
+    name: hospital-w
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: HOSPITAL_DB_SERVER        # ej. hospitalw.database.windows.net
+        sync: false
+      - key: HOSPITAL_DB_USER
+        sync: false
+      - key: HOSPITAL_DB_PASSWORD
+        sync: false
+      - key: HOSPITAL_DB_NAME
+        value: hospitalProyecto
+      - key: HOSPITAL_DB_ENCRYPT       # Azure SQL exige conexión cifrada
+        value: "si"
+      - key: HOSPITAL_DB_TIMEOUT       # la base gratis de Azure tarda en despertar
+        value: "60"
+      - key: HOSPITAL_SPARK_MEMORIA    # plan gratis: 512 MB en total
+        value: 256m
+      - key: HOSPITAL_IDS_CON_SPARK    # dar de alta registros no depende de Spark
+        value: "0"
