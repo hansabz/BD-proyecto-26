@@ -1,16 +1,15 @@
 """
 areas/inventario.py — RF4: Gestión de inventario de suministros médicos (Figura 5) + Query 3.
 
-Tablas (script actualizado):
-    informeSuministroIngreso  (ubicación, insumo) -> cantidadOrdenada = total ordenado (suma de entradas)
+Tablas (diseño del grupo; las tres usan idSuministro como FK hacia suministro):
+    informeSuministroIngreso  una fila por entrada (noEntrada): almacén, insumo, cantidadOrdenada, fecha
     suministroUbicacion       (ubicación, insumo) -> cantidadDisponible = stock actual,
                                                      cantidadIdeal = nivel ideal (base de la Query 3)
-    entradaSuministro         bitácora de entradas  [AJUSTE]
-    informeSuministroSalida   bitácora de salidas (a un empleado) y traslados entre almacenes
+    informeSuministroSalida   una fila por salida (noSalida): consumo o traslado entre almacenes
 
 Tres tipos de movimiento, todos en UNA transacción:
-    E  entrada   suma stock en una ubicación                   -> entradaSuministro
-    S  salida    resta stock y lo entrega a un empleado        -> informeSuministroSalida (destino NULL)
+    E  entrada   suma stock en una ubicación                   -> informeSuministroIngreso
+    S  salida    resta stock (consumo)                         -> informeSuministroSalida (destino NULL)
     T  traslado  resta en la fuente, suma en el destino        -> informeSuministroSalida (destino = almacén)
 Cada insumo está atado obligatoriamente a un proveedor registrado (FK).
 """
@@ -24,8 +23,7 @@ from core.db import ErrorNegocio
 from core.spark import leer_sql
 
 TITULO = "Inventario de suministros médicos"
-TABLAS = ["suministroUbicacion", "informeSuministroIngreso", "suministro", "proveedor",
-          "entradaSuministro", "informeSuministroSalida"]
+TABLAS = ["suministroUbicacion", "informeSuministroIngreso", "suministro", "proveedor", "informeSuministroSalida"]
 
 TIPOS = {"Q": "Quirúrgico", "F": "Farmacéutico", "M": "Material médico"}
 
@@ -34,20 +32,22 @@ TIPOS = {"Q": "Quirúrgico", "F": "Farmacéutico", "M": "Material médico"}
 # Se renombra cantidadDisponible -> existencia para que la interfaz no dependa
 # de los nombres de las tablas. idStock = "U01/Q001": clave única de la fila.
 BASE_SQL = f"""
-SELECT sb.codigoUbicacion + '/' + sb.codigoSuministro AS idStock,
+SELECT sb.codigoUbicacion + '/' + sb.idSuministro AS idStock,
        su.codigoSuministro, su.nombre AS suministro, su.descripcion, su.tipo,
        CASE su.tipo WHEN 'Q' THEN 'Quirúrgico' WHEN 'F' THEN 'Farmacéutico' ELSE 'Material médico' END AS tipoNombre,
        sb.codigoUbicacion, u.nombre AS ubicacion,
-       sb.cantidadDisponible AS existencia, sb.cantidadIdeal, ig.cantidadOrdenada,
+       sb.cantidadDisponible AS existencia, sb.cantidadIdeal,
+       -- total ingresado a esta ubicación = suma de sus entradas
+       ISNULL((SELECT SUM(ig.cantidadOrdenada) FROM informeSuministroIngreso ig
+               WHERE ig.codigoUbicacion = sb.codigoUbicacion AND ig.idSuministro = sb.idSuministro), 0)
+           AS cantidadOrdenada,
        CAST(100.0 * sb.cantidadDisponible / sb.cantidadIdeal AS dec(6,1)) AS porcentaje,
        su.costoUnitario, CAST(sb.cantidadDisponible * su.costoUnitario AS dec(12,2)) AS valorInventario,
        su.codigoProveedor, pr.nombre AS proveedor,
        CAST(CASE WHEN sb.cantidadDisponible < {config.UMBRAL_STOCK_CRITICO} * sb.cantidadIdeal
                  THEN 1 ELSE 0 END AS bit) AS critico
 FROM suministroUbicacion sb
-JOIN informeSuministroIngreso ig ON ig.codigoUbicacion = sb.codigoUbicacion
-                                AND ig.codigoSuministro = sb.codigoSuministro
-JOIN suministro su ON su.codigoSuministro = sb.codigoSuministro
+JOIN suministro su ON su.codigoSuministro = sb.idSuministro
 JOIN ubicacion u   ON u.codigoUbicacion = sb.codigoUbicacion
 JOIN proveedor pr  ON pr.codigoProveedor = su.codigoProveedor
 """
@@ -73,7 +73,7 @@ def metricas() -> list[dict]:
                                     SUM(CAST(critico AS int)) AS criticos FROM ({BASE_SQL}) q""")
     proveedores = db.escalar("SELECT COUNT(*) FROM proveedor")
     semana = db.consultar_uno("""
-        SELECT (SELECT COUNT(*) FROM entradaSuministro WHERE fecha >= DATEADD(day, -7, GETDATE())) AS entradas,
+        SELECT (SELECT COUNT(*) FROM informeSuministroIngreso WHERE fecha >= DATEADD(day, -7, GETDATE())) AS entradas,
                (SELECT COUNT(*) FROM informeSuministroSalida WHERE codigoUbicacionDestino IS NULL
                                                              AND fecha >= DATEADD(day, -7, GETDATE())) AS salidas,
                (SELECT COUNT(*) FROM informeSuministroSalida WHERE codigoUbicacionDestino IS NOT NULL
@@ -85,7 +85,7 @@ def metricas() -> list[dict]:
          "tono": "alerta" if m["criticos"] else ""},
         {"etiqueta": "Proveedores", "valor": proveedores or 0, "detalle": "registrados"},
         {"etiqueta": "Entradas (7 días)", "valor": semana["entradas"] or 0, "detalle": "reabastecimiento"},
-        {"etiqueta": "Salidas (7 días)", "valor": semana["salidas"] or 0, "detalle": "entregadas a personal"},
+        {"etiqueta": "Salidas (7 días)", "valor": semana["salidas"] or 0, "detalle": "consumo"},
         {"etiqueta": "Traslados (7 días)", "valor": semana["traslados"] or 0, "detalle": "entre almacenes"},
     ]
 
@@ -107,14 +107,9 @@ def catalogos() -> dict:
         "suministros": db.consultar("""SELECT s.codigoSuministro AS id, s.nombre, s.descripcion, s.tipo,
                                               s.costoUnitario, s.codigoProveedor, p.nombre AS proveedor,
                                               ISNULL((SELECT SUM(cantidadDisponible) FROM suministroUbicacion sb
-                                                      WHERE sb.codigoSuministro = s.codigoSuministro), 0) AS existencia
+                                                      WHERE sb.idSuministro = s.codigoSuministro), 0) AS existencia
                                        FROM suministro s JOIN proveedor p ON p.codigoProveedor = s.codigoProveedor
                                        ORDER BY s.codigoSuministro"""),
-        # Destinatario de una salida: cualquier empleado activo, sin importar su puesto.
-        "empleados": db.consultar("""SELECT e.numeroEmpleado AS id, e.nombres + ' ' + e.apellidos AS nombre,
-                                            p.nombre AS puesto
-                                     FROM empleado e JOIN puesto p ON p.codigoPuesto = e.codigoPuesto
-                                     WHERE e.activo = 1 ORDER BY e.nombres, e.apellidos"""),
         "tipos": [{"id": k, "nombre": v} for k, v in TIPOS.items()],
     }
 
@@ -123,19 +118,18 @@ def movimientos_recientes() -> list[dict]:
     """Últimas entradas, salidas y traslados juntos (UNION ALL de las dos bitácoras)."""
     return db.consultar("""
         SELECT TOP 15 * FROM (
-            SELECT en.fecha, 'E' AS tipo, en.cantidad, s.nombre AS suministro, u.nombre AS ubicacion,
-                   NULL AS destino, NULL AS destinatario
-            FROM entradaSuministro en
-            JOIN suministro s ON s.codigoSuministro = en.codigoSuministro
+            SELECT en.fecha, 'E' AS tipo, en.cantidadOrdenada AS cantidad, s.nombre AS suministro,
+                   u.nombre AS ubicacion, NULL AS destino
+            FROM informeSuministroIngreso en
+            JOIN suministro s ON s.codigoSuministro = en.idSuministro
             JOIN ubicacion u  ON u.codigoUbicacion = en.codigoUbicacion
             UNION ALL
             SELECT sa.fecha, CASE WHEN sa.codigoUbicacionDestino IS NULL THEN 'S' ELSE 'T' END,
-                   sa.cantidadDespachada, s.nombre, uf.nombre, ud.nombre, e.nombres + ' ' + e.apellidos
+                   sa.cantidadDespachada, s.nombre, uf.nombre, ud.nombre
             FROM informeSuministroSalida sa
-            JOIN suministro s  ON s.codigoSuministro = sa.codigoSuministro
+            JOIN suministro s  ON s.codigoSuministro = sa.idSuministro
             JOIN ubicacion uf  ON uf.codigoUbicacion = sa.codigoUbicacionFuente
             LEFT JOIN ubicacion ud ON ud.codigoUbicacion = sa.codigoUbicacionDestino
-            JOIN empleado e    ON e.numeroEmpleado = sa.empleadoDestinatario
         ) m ORDER BY fecha DESC""")
 
 
@@ -202,28 +196,19 @@ def _validar_suministro(datos: dict, nuevo: bool) -> dict:
 
 
 def _habilitar_en_ubicacion(cur, ubicacion: str, codigo: str, ideal: int) -> None:
-    """
-    Primera vez que un insumo llega a una ubicación: se crea su ficha en
-    informeSuministroIngreso (todavía sin nada ordenado) y su fila de stock en 0
-    con la cantidad ideal. El orden importa: suministroUbicacion tiene FK hacia
-    informeSuministroIngreso.
-    """
-    cur.execute("INSERT INTO informeSuministroIngreso (codigoUbicacion, codigoSuministro, cantidadOrdenada)"
-                " VALUES (?, ?, 0)", ubicacion, codigo)
-    cur.execute("INSERT INTO suministroUbicacion (codigoUbicacion, codigoSuministro, cantidadDisponible, cantidadIdeal)"
+    """Primera vez que un insumo llega a una ubicación: su fila de stock en 0 con la cantidad ideal."""
+    cur.execute("INSERT INTO suministroUbicacion (codigoUbicacion, idSuministro, cantidadDisponible, cantidadIdeal)"
                 " VALUES (?, ?, 0, ?)", ubicacion, codigo, ideal)
 
 
 def _registrar_orden(cur, ubicacion: str, codigo: str, cantidad: int) -> None:
-    """Cada entrada suma a cantidadOrdenada (total ordenado a esa ubicación) y queda en la bitácora."""
-    cur.execute("UPDATE informeSuministroIngreso SET cantidadOrdenada = cantidadOrdenada + ?"
-                " WHERE codigoUbicacion = ? AND codigoSuministro = ?", cantidad, ubicacion, codigo)
-    cur.execute("INSERT INTO entradaSuministro (codigoUbicacion, codigoSuministro, cantidad) VALUES (?, ?, ?)",
-                ubicacion, codigo, cantidad)
+    """Cada entrada es una fila nueva de informeSuministroIngreso (noEntrada y fecha los pone SQL Server)."""
+    cur.execute("INSERT INTO informeSuministroIngreso (codigoUbicacion, idSuministro, cantidadOrdenada)"
+                " VALUES (?, ?, ?)", ubicacion, codigo, cantidad)
 
 
 def crear_suministro(datos: dict) -> dict:
-    """Insumo + su ficha en la ubicación + stock inicial + la entrada en bitácora, en una transacción."""
+    """Insumo + su fila de stock en la ubicación + la entrada del stock inicial, en una transacción."""
     d = _validar_suministro(datos, nuevo=True)
     with id_generators.LOCK_IDS:
         codigo = id_generators.generar_id_suministro(d["tipo"])
@@ -252,16 +237,15 @@ def eliminar_suministro(codigo: str) -> dict:
     """Solo se puede borrar un insumo cargado por error: sin stock y sin salidas/traslados."""
     with db.transaccion() as cur:
         stock = cur.execute("SELECT ISNULL(SUM(cantidadDisponible), 0) FROM suministroUbicacion"
-                            " WHERE codigoSuministro = ?", codigo).fetchone()[0]
-        salidas = cur.execute("SELECT COUNT(*) FROM informeSuministroSalida WHERE codigoSuministro = ?",
+                            " WHERE idSuministro = ?", codigo).fetchone()[0]
+        salidas = cur.execute("SELECT COUNT(*) FROM informeSuministroSalida WHERE idSuministro = ?",
                               codigo).fetchone()[0]
         if stock or salidas:
             raise ErrorNegocio(f"{codigo} tiene stock o salidas registradas: no se puede borrar "
                                "(conservá el historial; dejalo en 0).")
         # Se borra de "abajo hacia arriba" para respetar las FK.
-        cur.execute("DELETE FROM entradaSuministro WHERE codigoSuministro = ?", codigo)
-        cur.execute("DELETE FROM suministroUbicacion WHERE codigoSuministro = ?", codigo)
-        cur.execute("DELETE FROM informeSuministroIngreso WHERE codigoSuministro = ?", codigo)
+        cur.execute("DELETE FROM informeSuministroIngreso WHERE idSuministro = ?", codigo)
+        cur.execute("DELETE FROM suministroUbicacion WHERE idSuministro = ?", codigo)
         cur.execute("DELETE FROM suministro WHERE codigoSuministro = ?", codigo)
         if cur.rowcount == 0:
             raise ErrorNegocio(f"No existe el insumo {codigo}.")
@@ -275,18 +259,18 @@ def _stock_bloqueado(cur, ubicacion: str, codigo: str):
     espera y ve el stock ya descontado. Devuelve None si no existe la fila.
     """
     fila = cur.execute("SELECT cantidadDisponible FROM suministroUbicacion WITH (UPDLOCK, HOLDLOCK)"
-                       " WHERE codigoUbicacion = ? AND codigoSuministro = ?", ubicacion, codigo).fetchone()
+                       " WHERE codigoUbicacion = ? AND idSuministro = ?", ubicacion, codigo).fetchone()
     return None if fila is None else fila[0]
 
 
 def _sumar(cur, ubicacion, codigo, cantidad):
     cur.execute("UPDATE suministroUbicacion SET cantidadDisponible = cantidadDisponible + ?"
-                " WHERE codigoUbicacion = ? AND codigoSuministro = ?", cantidad, ubicacion, codigo)
+                " WHERE codigoUbicacion = ? AND idSuministro = ?", cantidad, ubicacion, codigo)
 
 
 def registrar_movimiento(datos: dict) -> dict:
     """
-    Entrada (E), salida a un empleado (S) o traslado entre almacenes (T).
+    Entrada (E), salida/consumo (S) o traslado entre almacenes (T).
     Todo ocurre en UNA transacción: si falta stock o algún dato es inválido,
     no se modifica nada.
     """
@@ -295,7 +279,6 @@ def registrar_movimiento(datos: dict) -> dict:
     codigo = datos.get("codigoSuministro") or ""
     tipo = (datos.get("tipo") or "").upper()
     destino = datos.get("codigoUbicacionDestino") or ""
-    destinatario = datos.get("empleadoDestinatario") or ""
     cantidad = _entero(datos.get("cantidad"), "cantidad", errores, 1)
     if tipo not in ("E", "S", "T"):
         errores["tipo"] = "Entrada, salida o traslado."
@@ -310,17 +293,6 @@ def registrar_movimiento(datos: dict) -> dict:
             errores["codigoUbicacionDestino"] = "El destino debe ser distinto del origen."
         elif not db.escalar("SELECT COUNT(*) FROM ubicacion WHERE codigoUbicacion = ?", (destino,)):
             errores["codigoUbicacionDestino"] = "Almacén inexistente."
-        if not destinatario and destino:
-            # Si no se indica quién recibe un traslado, lo recibe el encargado del almacén destino.
-            destinatario = db.escalar("SELECT empleadoEncargado FROM ubicacion WHERE codigoUbicacion = ?",
-                                      (destino,)) or ""
-    if tipo in ("S", "T"):
-        # Destinatario: cualquier empleado ACTIVO, sin importar su puesto.
-        if not destinatario:
-            errores["empleadoDestinatario"] = "Indicá qué empleado recibe."
-        elif not db.escalar("SELECT COUNT(*) FROM empleado WHERE numeroEmpleado = ? AND activo = 1",
-                            (destinatario,)):
-            errores["empleadoDestinatario"] = "Ese empleado no existe o está dado de baja."
     if errores:
         raise ErrorNegocio(errores)
 
@@ -354,9 +326,10 @@ def registrar_movimiento(datos: dict) -> dict:
                                                              "indicá su cantidad ideal allí."})
                     _habilitar_en_ubicacion(cur, destino, codigo, ideal)
                 _sumar(cur, destino, codigo, cantidad)
-            cur.execute("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, codigoSuministro,"
-                        " cantidadDespachada, codigoUbicacionDestino, empleadoDestinatario) VALUES (?, ?, ?, ?, ?)",
-                        ubicacion, codigo, cantidad, destino if tipo == "T" else None, destinatario)
+            # noSalida (IDENTITY) y fecha (DEFAULT GETDATE()) los pone SQL Server.
+            cur.execute("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, idSuministro,"
+                        " cantidadDespachada, codigoUbicacionDestino) VALUES (?, ?, ?, ?)",
+                        ubicacion, codigo, cantidad, destino if tipo == "T" else None)
         nueva = _stock_bloqueado(cur, ubicacion, codigo)
     textos = {"E": "Entrada de {n} u. registrada. Existencia actual: {q}.",
               "S": "Salida de {n} u. registrada. Quedan {q} en el origen.",
@@ -453,8 +426,8 @@ def _nivel_stock(df):
 
 
 def _salidas_por_semana(df):
-    """Consumo = salidas entregadas a personal (los traslados no son consumo, solo cambian de lugar)."""
-    mov = leer_sql("SELECT codigoUbicacionFuente + '/' + codigoSuministro AS idStock, cantidadDespachada AS cantidad,"
+    """Consumo = salidas (los traslados no son consumo, solo cambian de lugar)."""
+    mov = leer_sql("SELECT codigoUbicacionFuente + '/' + idSuministro AS idStock, cantidadDespachada AS cantidad,"
                    " fecha FROM informeSuministroSalida WHERE codigoUbicacionDestino IS NULL")
     pdf = (mov.join(df.select("idStock"), "idStock")
            .groupBy(F.date_trunc("week", "fecha").alias("semana")).agg(F.sum("cantidad").alias("unidades"))

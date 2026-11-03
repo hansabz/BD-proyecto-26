@@ -40,7 +40,7 @@ El programa web tiene **tres piezas que se hablan entre sí**:
 
 | Archivo | Por qué es crucial |
 |---|---|
-| `sql/01_esquema.sql` | **El modelo de datos**: 18 tablas, PK, FK, CHECK, DEFAULT. Es la Fase I (50 % de la nota). |
+| `sql/01_esquema.sql` | **El modelo de datos**: 17 tablas, PK, FK, CHECK, DEFAULT. Es la Fase I (50 % de la nota). |
 | `sql/02_indices_vistas.sql` | **Índices agrupados/no agrupados y las Queries 1, 2 y 3** que pide la guía. |
 | `sql/03_datos_prueba.sql` | Datos para que la base no esté vacía al revisarla. |
 | `bigdata/HospitalW_BigData.ipynb` | **El cuaderno de Google Colab**: Fase II completa (50 % de la nota). |
@@ -122,7 +122,7 @@ cualquier fila). Si la huella es distinta a la anterior, el navegador recarga la
 | RF1 Personal | `empleado`, `sala`, `asignacionSala` | El personal y en qué salas trabaja |
 | RF2 Pacientes | `paciente`, `registroIngreso`, `informeCita` | Pacientes, cada ingreso (con familiar y médico que refiere) y citas |
 | RF3 Hospitalización | `cama`, `asignacionCama` | Camas (0 libre / 1 ocupada) e internaciones con su nivel de riesgo |
-| RF4 Inventario | `ubicacion`, `proveedor`, `suministro`, `informeSuministroIngreso`, `suministroUbicacion`, `entradaSuministro`, `informeSuministroSalida` | Almacenes, proveedores, insumos, stock, entradas, salidas y traslados |
+| RF4 Inventario | `ubicacion`, `proveedor`, `suministro`, `informeSuministroIngreso`, `suministroUbicacion`, `informeSuministroSalida` | Almacenes, proveedores, insumos; una fila por cada entrada (`noEntrada`), el stock por almacén y una fila por cada salida o traslado (`noSalida`) |
 
 ### Las restricciones (qué hace cada tipo)
 
@@ -145,7 +145,7 @@ Cada uno está marcado en `sql/01_esquema.sql` con su motivo. Los más important
 - Tamaños de `varchar` ampliados → `PAC-0001` no entraba en 5 caracteres, "Enfermera Jefe" no entraba en 10.
 - Tabla `proveedor` → RF4 pide un proveedor "debidamente registrado" y la Query 3 sus datos de contacto.
 - `suministroUbicacion.cantidadIdeal` → base del 15 % de la Query 3.
-- `informeSuministroSalida` con `idSalida` autoincremental → con la PK original solo se podía despachar **una vez** cada insumo desde cada almacén.
+- `fecha` en `informeSuministroIngreso` e `informeSuministroSalida` → cada entrada y salida queda con su fecha (bitácora y índice agrupado).
 - Índices únicos filtrados en `asignacionCama` → **el propio SQL Server impide** dos internaciones activas en la misma cama (RF3).
 
 ### Las 3 queries (en `sql/02_indices_vistas.sql`)
@@ -329,7 +329,7 @@ Spark), `filtros()`, `GRAFICOS` y sus funciones de CRUD.
 | Archivo | Qué es | ¿Lo usa la app? |
 |---|---|---|
 | `00_script_original_comentado.sql` | Script original del grupo, explicado. Documentación. | No |
-| `01_esquema.sql` | Las 18 tablas con todas sus restricciones | Sí |
+| `01_esquema.sql` | Las 17 tablas con todas sus restricciones | Sí |
 | `02_indices_vistas.sql` | Índices + Query 1, 2 y 3 | Sí |
 | `03_datos_prueba.sql` | Datos de prueba | Solo si se arma la base desde SSMS |
 | `04_prueba_indices.sql` | Prueba de rendimiento del índice agrupado | No (se corre en SSMS) |
@@ -405,7 +405,7 @@ calcula el siguiente número con `regexp_extract` y `max`.
 3. **Admisión**: admitir un paciente (Figura 2), abrir su expediente (Query 2).
 4. **Hospitalización**: intentar internarlo en una cama **ocupada** (se rechaza), luego en una libre
    (la fecha se pone sola), y dar el alta.
-5. **Inventario**: hacer una salida sin destinatario (se rechaza), un traslado, y mostrar la
+5. **Inventario**: hacer una salida mayor al stock (se rechaza), un traslado, y mostrar la
    alerta de stock crítico (Query 3).
 6. **Tiempo real**: con el dashboard abierto, hacer un `UPDATE` en SSMS y ver cómo aparece solo.
 7. **Telemetría**: ejecutar los pasos 2 a 6 del pipeline.

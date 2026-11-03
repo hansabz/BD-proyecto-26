@@ -206,13 +206,12 @@ ALTER TABLE informeCita ADD CONSTRAINT DF_cita_fecha DEFAULT CAST(GETDATE() AS d
 GO
 
 -- RF4 — Inventario ----------------------------------------------------
--- Flujo con las tablas del script actualizado:
---   informeSuministroIngreso  qué insumo se maneja en qué ubicación y cuánto se ha ORDENADO
---                             en total (cantidadOrdenada se acumula con cada entrada)
+-- Tres tablas separadas, según el diseño del grupo:
+--   informeSuministroIngreso  una fila por cada ENTRADA (noEntrada): a qué almacén y cuánto ingresó
 --   suministroUbicacion       cuánto hay HOY (cantidadDisponible) y cuánto DEBERÍA haber
 --                             (cantidadIdeal, base del 15 % de la Query 3)
---   entradaSuministro         bitácora de entradas (reabastecimiento)
---   informeSuministroSalida   bitácora de salidas (a un empleado) y traslados entre almacenes
+--   informeSuministroSalida   una fila por cada SALIDA (noSalida): consumo o traslado entre almacenes
+-- Las tres usan idSuministro como FK hacia suministro(codigoSuministro).
 
 CREATE TABLE ubicacion(
     codigoUbicacion     varchar(5)  NOT NULL,
@@ -257,68 +256,51 @@ ALTER TABLE suministro ADD CONSTRAINT CK_suministro_prefijo CHECK (LEFT(codigoSu
 ALTER TABLE suministro ADD CONSTRAINT DF_suministro_descripcion DEFAULT 'Sin descripción' FOR descripcion;
 GO
 
-CREATE TABLE informeSuministroIngreso(      -- tal cual el script
-    codigoUbicacion     varchar(5) NOT NULL,
-    codigoSuministro    varchar(5) NOT NULL,
-    cantidadOrdenada    int        NOT NULL,   -- total ordenado/ingresado a esta ubicación (suma de entradas)
-    CONSTRAINT PK_informeSuministroIngreso PRIMARY KEY (codigoUbicacion, codigoSuministro),
+CREATE TABLE informeSuministroIngreso(      -- bitácora de entradas: UNA fila por cada ingreso de mercadería
+    noEntrada           int IDENTITY(1,1) NOT NULL,
+    codigoUbicacion     varchar(5) NOT NULL,       -- almacén que recibe
+    idSuministro        varchar(5) NOT NULL,
+    cantidadOrdenada    int        NOT NULL,       -- unidades que ingresaron en esta entrada
+    fecha               datetime   NOT NULL,       -- [AJUSTE] cuándo ingresó (bitácora, índice agrupado)
+    -- PK no agrupada: el índice agrupado va sobre fecha (ver 02_indices_vistas.sql)
+    CONSTRAINT PK_informeSuministroIngreso PRIMARY KEY NONCLUSTERED (noEntrada),
     CONSTRAINT FK_informeSuministroIngreso_ubicacion FOREIGN KEY (codigoUbicacion) REFERENCES ubicacion(codigoUbicacion),
-    CONSTRAINT FK_informeSuministroIngreso_suministro FOREIGN KEY (codigoSuministro) REFERENCES suministro(codigoSuministro)
+    CONSTRAINT FK_informeSuministroIngreso_suministro FOREIGN KEY (idSuministro) REFERENCES suministro(codigoSuministro)
 );
 -- CHECK y DEFAULT
-ALTER TABLE informeSuministroIngreso ADD CONSTRAINT CK_informeSuministroIngreso_cantidad CHECK (cantidadOrdenada >= 0);
-ALTER TABLE informeSuministroIngreso ADD CONSTRAINT DF_informeSuministroIngreso_cantidad DEFAULT 0 FOR cantidadOrdenada;
+ALTER TABLE informeSuministroIngreso ADD CONSTRAINT CK_informeSuministroIngreso_cantidad CHECK (cantidadOrdenada > 0);
+ALTER TABLE informeSuministroIngreso ADD CONSTRAINT CK_informeSuministroIngreso_fecha CHECK (fecha <= GETDATE());  -- no a futuro
+ALTER TABLE informeSuministroIngreso ADD CONSTRAINT DF_informeSuministroIngreso_fecha DEFAULT GETDATE() FOR fecha;
 GO
 
-CREATE TABLE suministroUbicacion(           -- tal cual el script
+CREATE TABLE suministroUbicacion(           -- stock actual de cada insumo en cada almacén
     codigoUbicacion     varchar(5) NOT NULL,
-    codigoSuministro    varchar(5) NOT NULL,
+    idSuministro        varchar(5) NOT NULL,
     cantidadDisponible  int        NOT NULL,   -- stock actual
-    cantidadIdeal       int        NOT NULL,   -- [AJUSTE] nivel ideal de stock en esta ubicación:
-                                               -- la Query 3 compara cantidadDisponible contra este valor
-    CONSTRAINT PK_suministroUbicacion PRIMARY KEY (codigoUbicacion, codigoSuministro),
-    CONSTRAINT CK_suministroUbicacion_cantidad CHECK (cantidadDisponible >= 0),   -- [AJUSTE] nunca stock negativo
-    CONSTRAINT FK_suministroUbicacion_ubicacion FOREIGN KEY (codigoUbicacion, codigoSuministro)
-        REFERENCES informeSuministroIngreso(codigoUbicacion, codigoSuministro)
+    cantidadIdeal       int        NOT NULL,   -- nivel ideal en esta ubicación: la Query 3 compara contra este valor
+    CONSTRAINT PK_suministroUbicacion PRIMARY KEY (codigoUbicacion, idSuministro),
+    CONSTRAINT CK_suministroUbicacion_cantidad CHECK (cantidadDisponible >= 0),   -- nunca stock negativo
+    CONSTRAINT FK_suministroUbicacion_ubicacion FOREIGN KEY (codigoUbicacion) REFERENCES ubicacion(codigoUbicacion),
+    CONSTRAINT FK_suministroUbicacion_suministro FOREIGN KEY (idSuministro) REFERENCES suministro(codigoSuministro)
 );
 -- CHECK y DEFAULT
 ALTER TABLE suministroUbicacion ADD CONSTRAINT CK_suministroUbicacion_ideal CHECK (cantidadIdeal > 0);  -- evita dividir entre 0
 ALTER TABLE suministroUbicacion ADD CONSTRAINT DF_suministroUbicacion_disponible DEFAULT 0 FOR cantidadDisponible;
 GO
 
-CREATE TABLE entradaSuministro(             -- [AJUSTE] bitácora de entradas (el script no tenía dónde registrarlas)
-    idEntrada           int IDENTITY(1,1) NOT NULL,
-    codigoUbicacion     varchar(5) NOT NULL,
-    codigoSuministro    varchar(5) NOT NULL,
-    cantidad            int        NOT NULL,
-    fecha               datetime   NOT NULL,
-    -- PK no agrupada: el índice agrupado va sobre fecha (ver 02_indices_vistas.sql)
-    CONSTRAINT PK_entradaSuministro PRIMARY KEY NONCLUSTERED (idEntrada),
-    CONSTRAINT CK_entrada_cantidad CHECK (cantidad > 0),
-    CONSTRAINT FK_entrada_suministroUbicacion FOREIGN KEY (codigoUbicacion, codigoSuministro)
-        REFERENCES suministroUbicacion(codigoUbicacion, codigoSuministro)
-);
--- CHECK y DEFAULT
-ALTER TABLE entradaSuministro ADD CONSTRAINT CK_entrada_fecha CHECK (fecha <= GETDATE());   -- no se registran entradas a futuro
-ALTER TABLE entradaSuministro ADD CONSTRAINT DF_entrada_fecha DEFAULT GETDATE() FOR fecha;  -- fecha y hora reales del movimiento
-GO
-
-CREATE TABLE informeSuministroSalida(
-    idSalida                int IDENTITY(1,1) NOT NULL,  -- [AJUSTE] con PK (fuente, insumo) solo se podía
-                                                         -- despachar UNA vez cada insumo desde cada ubicación
+CREATE TABLE informeSuministroSalida(       -- bitácora de salidas (consumo) y traslados entre almacenes
+    noSalida                int IDENTITY(1,1) NOT NULL,
     codigoUbicacionFuente   varchar(5)  NOT NULL,
-    codigoSuministro        varchar(5)  NOT NULL,
+    idSuministro            varchar(5)  NOT NULL,
     cantidadDespachada      int         NOT NULL,
-    codigoUbicacionDestino  varchar(5)  NULL,      -- [AJUSTE] NULL = salida/consumo; con valor = traslado entre almacenes
-    empleadoDestinatario    varchar(5)  NOT NULL,  -- [AJUSTE] quién recibe (cualquier empleado registrado)
-    fecha                   datetime    NOT NULL,  -- [AJUSTE]
-    CONSTRAINT PK_informeSuministroSalida PRIMARY KEY NONCLUSTERED (idSalida),
+    codigoUbicacionDestino  varchar(5)  NULL,      -- NULL = salida/consumo; con valor = traslado a otro almacén
+    fecha                   datetime    NOT NULL,  -- [AJUSTE] cuándo salió (bitácora, índice agrupado)
+    CONSTRAINT PK_informeSuministroSalida PRIMARY KEY NONCLUSTERED (noSalida),
     CONSTRAINT CK_salida_cantidad CHECK (cantidadDespachada > 0),
     CONSTRAINT CK_salida_destino CHECK (codigoUbicacionDestino IS NULL OR codigoUbicacionDestino <> codigoUbicacionFuente),
-    CONSTRAINT FK_informeSuministroSalida_suministroUbicacion FOREIGN KEY (codigoUbicacionFuente, codigoSuministro)
-        REFERENCES suministroUbicacion(codigoUbicacion, codigoSuministro),
-    CONSTRAINT FK_informeSuministroSalida_ubicacion FOREIGN KEY (codigoUbicacionDestino) REFERENCES ubicacion(codigoUbicacion),
-    CONSTRAINT FK_informeSuministroSalida_empleado FOREIGN KEY (empleadoDestinatario) REFERENCES empleado(numeroEmpleado)
+    CONSTRAINT FK_informeSuministroSalida_fuente FOREIGN KEY (codigoUbicacionFuente) REFERENCES ubicacion(codigoUbicacion),
+    CONSTRAINT FK_informeSuministroSalida_suministro FOREIGN KEY (idSuministro) REFERENCES suministro(codigoSuministro),
+    CONSTRAINT FK_informeSuministroSalida_destino FOREIGN KEY (codigoUbicacionDestino) REFERENCES ubicacion(codigoUbicacion)
 );
 -- CHECK y DEFAULT
 ALTER TABLE informeSuministroSalida ADD CONSTRAINT CK_salida_fecha CHECK (fecha <= GETDATE());   -- no se registran salidas a futuro

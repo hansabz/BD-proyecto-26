@@ -23,11 +23,11 @@ TABLAS = [
     "puesto", "especialidad", "turno", "sala", "empleado", "asignacionSala",
     "paciente", "registroIngreso", "cama", "asignacionCama", "informeCita",
     "ubicacion", "proveedor", "suministro", "informeSuministroIngreso",
-    "suministroUbicacion", "entradaSuministro", "informeSuministroSalida",
+    "suministroUbicacion", "informeSuministroSalida",
 ]
 # Tablas con columna IDENTITY (autoincremental): para insertar el ID a mano hay que
 # activar IDENTITY_INSERT mientras dura el INSERT.
-CON_IDENTITY = {"entradaSuministro", "informeSuministroSalida"}
+CON_IDENTITY = {"informeSuministroIngreso", "informeSuministroSalida"}
 FILAS_POR_INSERT = 500          # SQL Server acepta hasta 1000 filas por INSERT ... VALUES
 
 
@@ -56,7 +56,7 @@ def exportar(destino: Path) -> dict:
         "   Ejecutar DESPUÉS de 01_esquema.sql y 02_indices_vistas.sql, sobre una base vacía.",
         "   Los logs de telemetría NO están aquí: viven en bigdata/datos/ (no van a la base).",
         "   ========================================================================== */",
-        f"USE [{config.DB_NAME}];",
+        "USE [hospitalProyecto];",          # siempre la base del proyecto, aunque se exporte desde una copia
         "SET NOCOUNT ON;",
         "GO",
         "",

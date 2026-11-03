@@ -16,7 +16,7 @@ Big Data con **PySpark**. La interfaz es HTML/CSS y las gráficas salen de **pan
 | **Personal** (RF1) | Alta, modificación, consulta y baja lógica. NSS único; ID generado por rol (M1001 / E1001 / A1001) con PySpark |
 | **Admisión** (RF2) | Ficha de ingreso del paciente (Figura 2), expediente e historial de citas (Query 2) |
 | **Hospitalización** (RF3) | Mapa de camas, internación sin choques de cama, fechas automáticas, nivel de riesgo |
-| **Inventario** (RF4) | Stock por ubicación, entradas, salidas a un empleado, traslados entre almacenes, alerta de stock crítico (Query 3) |
+| **Inventario** (RF4) | Stock por ubicación, entradas, salidas (consumo), traslados entre almacenes, alerta de stock crítico (Query 3) |
 | **Telemetría** (Fase II) | Logs masivos de sensores: limpieza (BD 1), top 5 de alertas (BD 2), riesgo con UDF (BD 3), Parquet |
 
 Cada vista tiene una **tabla en tiempo real**, botón **Filtrar** (PySpark) y radio
@@ -118,7 +118,7 @@ BD-proyecto-26/
 │   ├── personal.py        RF1 — alta, modificación, consulta, baja lógica, NSS único, antigüedad.
 │   ├── pacientes.py       RF2 — ficha de ingreso (Figura 2) + historial de citas (Query 2).
 │   ├── hospitalizacion.py RF3 — asignación de camas sin choques, fechas automáticas, nivel de riesgo.
-│   ├── inventario.py      RF4 — entradas, salidas a un empleado, traslados entre almacenes, Query 3.
+│   ├── inventario.py      RF4 — entradas, salidas (consumo), traslados entre almacenes, Query 3.
 │   └── telemetria.py      Fase II dentro del dashboard: lee el CSV con PySpark y escribe nivelRiesgo.
 ├── bigdata/               Fase II — Big Data
 │   ├── generar_logs.py    Ingesta masiva: logs_monitoreo_pacientes.csv (Figura 6, ≥ 5,000 registros)
@@ -143,7 +143,7 @@ BD-proyecto-26/
 | RF3 no asignar cama ocupada | `hospitalizacion.asignar()` (bloqueo) + índice `UX_asignacionCama_camaOcupada` |
 | RF3 fechas automáticas | `DEFAULT GETDATE()` y `GETDATE()` en el alta |
 | RF4 proveedor obligatorio | FK `FK_suministro_proveedor` + `inventario._validar_suministro()` |
-| RF4 salida con destinatario / traslados | `inventario.registrar_movimiento()` → `informeSuministroSalida` |
+| RF4 entradas / salidas / traslados | `inventario.registrar_movimiento()` → `informeSuministroIngreso` / `informeSuministroSalida` |
 | Query 1 / 2 / 3 | `sql/02_indices_vistas.sql` (y se ven en Personal / expediente del paciente / Inventario) |
 | Índices agrupados y no agrupados | `sql/02_indices_vistas.sql` + `docs/INDICES.md` |
 | Ecosistema nube (SparkSession) | `bigdata/HospitalW_BigData.ipynb`, celda 1 |

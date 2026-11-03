@@ -2,7 +2,7 @@
 {#
   inventario.html — RF4: Inventario de suministros médicos (ruta /inventario).
   • Alerta de stock crítico (Query 3) con el contacto del proveedor
-  • Movimientos: entrada, salida a un empleado (destinatario) y traslado entre almacenes
+  • Movimientos: entrada, salida (consumo) y traslado entre almacenes
   • Existencias por ubicación (panel de datos), catálogo de insumos, proveedores
     e informe por ubicación (Figura 5)
 #}
@@ -105,9 +105,6 @@
       <div class="campo c3"><label for="m-cant">Cantidad</label><input type="number" min="1" step="1" id="m-cant" name="cantidad"></div>
       <div class="campo c6" id="m-destino-campo" hidden><label for="m-destino">Almacén destino</label>
         <select id="m-destino" name="codigoUbicacionDestino"></select></div>
-      <div class="campo c6" id="m-dest-campo" hidden><label for="m-dest">Empleado que recibe</label>
-        <select id="m-dest" name="empleadoDestinatario"></select>
-        <span class="ayuda" id="m-dest-ayuda">Cualquier empleado activo.</span></div>
       <div class="campo c6" id="m-cap-campo" hidden><label for="m-cap">Cantidad ideal en esta ubicación</label>
         <input type="number" min="1" step="1" id="m-cap" name="cantidadIdeal">
         <span class="ayuda" id="m-cap-ayuda">Es la primera entrada de este insumo en esta ubicación.</span></div>
@@ -169,7 +166,7 @@ async function cargarTodo() {
   $("#movimientos").innerHTML = movimientos.map((m) => `
     <li><span class="badge ${MOV[m.tipo][0]}">${MOV[m.tipo][1]}</span>
       <span class="grow"><b>${MOV[m.tipo][2]}${m.cantidad} · ${esc(m.suministro)}</b>
-        <small>${esc(m.ubicacion)}${m.destino ? ` → ${esc(m.destino)}` : ""}${m.destinatario ? ` · recibe ${esc(m.destinatario)}` : ""}</small></span>
+        <small>${esc(m.ubicacion)}${m.destino ? ` → ${esc(m.destino)}` : ""}</small></span>
       <small style="color:var(--muted);white-space:nowrap">${fmt.fechahora(m.fecha)}</small></li>`).join("");
 
   $("#tabla-catalogo").innerHTML = cat.suministros.map((s) => `<tr>
@@ -188,7 +185,7 @@ async function cargarTodo() {
 
   // Recargar las listas desplegables borra lo elegido: se guarda y se restaura, así un
   // formulario abierto no pierde lo que el usuario ya había seleccionado.
-  const ids = ["ubicacion-informe", "i-tipo", "i-prov", "i-ubi", "m-sum", "m-ubi", "m-destino", "m-dest"];
+  const ids = ["ubicacion-informe", "i-tipo", "i-prov", "i-ubi", "m-sum", "m-ubi", "m-destino"];
   const elegidos = Object.fromEntries(ids.map((id) => [id, document.getElementById(id).value]));
   opciones($("#ubicacion-informe"), cat.ubicaciones, { vacio: null });
   opciones($("#i-tipo"), cat.tipos);
@@ -197,7 +194,6 @@ async function cargarTodo() {
   opciones($("#m-sum"), cat.suministros, { texto: (s) => `${s.id} · ${s.nombre}` });
   opciones($("#m-ubi"), cat.ubicaciones);
   opciones($("#m-destino"), cat.ubicaciones);
-  opciones($("#m-dest"), cat.empleados, { texto: (e) => `${e.nombre} · ${e.puesto} (${e.id})` });
   ids.forEach((id) => { if (elegidos[id]) document.getElementById(id).value = elegidos[id]; });
   $("#i-prov-ayuda").textContent = cat.proveedores.length
     ? "Obligatorio. ¿No está en la lista? Registralo acá mismo con “+ Nuevo proveedor”."
@@ -257,17 +253,13 @@ formInsumo.addEventListener("submit", async (e) => {
 const formMov = $("#form-movimiento");
 const stockDe = (sum, ubi) => panel.registros.find((r) => r.codigoSuministro === sum && r.codigoUbicacion === ubi);
 
-/** Muestra u oculta campos según el tipo: E (entrada), S (salida a un empleado), T (traslado). */
+/** Muestra u oculta campos según el tipo: E (entrada), S (salida/consumo), T (traslado). */
 function actualizarStockActual() {
   const tipo = formMov.querySelector("[name=tipo]:checked").value;
   const sum = $("#m-sum").value, ubi = $("#m-ubi").value, destino = $("#m-destino").value;
   const fila = stockDe(sum, ubi);
   $("#m-ubi-rotulo").textContent = tipo === "E" ? "Ubicación que recibe" : "Ubicación de origen";
   $("#m-destino-campo").hidden = tipo !== "T";
-  $("#m-dest-campo").hidden = tipo === "E";
-  $("#m-dest-ayuda").textContent = tipo === "T"
-    ? "Si lo dejás vacío, lo recibe el encargado del almacén destino." : "Cualquier empleado activo, sin importar el puesto.";
-  $("#m-dest").options[0].textContent = tipo === "T" ? "Encargado del destino" : "Elegí…";
   // Cantidad ideal: solo se pide cuando el insumo llega por primera vez a una ubicación.
   const necesitaCap = (tipo === "E" && sum && ubi && !fila) || (tipo === "T" && sum && destino && !stockDe(sum, destino));
   $("#m-cap-campo").hidden = !necesitaCap;

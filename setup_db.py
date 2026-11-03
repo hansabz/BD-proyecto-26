@@ -260,17 +260,14 @@ def cargar_datos(cur):
             stock.append([ubi, cod, int(capacidad * rnd.uniform(0.2, 1.0)), capacidad])
     for fila in rnd.sample(stock, 6):          # stock crítico (< 15 %)
         fila[2] = int(fila[3] * rnd.uniform(0.0, 0.13))
-    # Ficha de ingreso y luego el stock actual con su cantidad ideal (FK en ese orden).
-    # cantidadOrdenada arranca con el stock inicial; abajo se le suman las entradas del historial.
-    cur.executemany("INSERT INTO informeSuministroIngreso (codigoUbicacion, codigoSuministro, cantidadOrdenada)"
-                    " VALUES (?,?,?)", [(u, c, ex) for u, c, ex, _ in stock])
-    cur.executemany("INSERT INTO suministroUbicacion (codigoUbicacion, codigoSuministro, cantidadDisponible,"
+    # Stock actual con su cantidad ideal, y el stock inicial registrado como la primera entrada
+    # de cada (ubicación, insumo), hace 91 a 120 días (antes del historial de abajo).
+    cur.executemany("INSERT INTO suministroUbicacion (codigoUbicacion, idSuministro, cantidadDisponible,"
                     " cantidadIdeal) VALUES (?,?,?,?)", [(u, c, ex, ideal) for u, c, ex, ideal in stock])
+    entradas = [(u, c, ex, HOY - dt.timedelta(days=rnd.randint(91, 120))) for u, c, ex, _ in stock if ex > 0]
 
-    # Historial: entradas, salidas a personal y traslados entre almacenes (últimos 90 días).
-    activos = [e[0] for e in EMPLEADOS if e[8]]
-    encargado = {u[0]: u[2] for u in UBICACIONES}
-    entradas, salidas = [], []
+    # Historial: entradas, salidas (consumo) y traslados entre almacenes (últimos 90 días).
+    salidas = []
     for _ in range(70):
         ubi, cod, _, capacidad = rnd.choice(stock)
         fecha = HOY - dt.timedelta(days=rnd.randint(0, 90), hours=rnd.randint(0, 23))
@@ -279,22 +276,17 @@ def cargar_datos(cur):
             case "E":
                 entradas.append((ubi, cod, cantidad, fecha))
             case "S":
-                salidas.append((ubi, cod, cantidad, None, rnd.choice(activos), fecha))
+                salidas.append((ubi, cod, cantidad, None, fecha))
             case "T":
                 destinos = [s for s in stock if s[1] == cod and s[0] != ubi]
                 if destinos:
-                    destino = rnd.choice(destinos)[0]
-                    salidas.append((ubi, cod, cantidad, destino, encargado[destino], fecha))
-    cur.executemany("INSERT INTO entradaSuministro (codigoUbicacion, codigoSuministro, cantidad, fecha)"
+                    salidas.append((ubi, cod, cantidad, rnd.choice(destinos)[0], fecha))
+    entradas.sort(key=lambda e: e[3])          # noEntrada crece con la fecha, como en la vida real
+    salidas.sort(key=lambda s: s[4])
+    cur.executemany("INSERT INTO informeSuministroIngreso (codigoUbicacion, idSuministro, cantidadOrdenada, fecha)"
                     " VALUES (?,?,?,?)", entradas)
-    cur.executemany("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, codigoSuministro, cantidadDespachada,"
-                    " codigoUbicacionDestino, empleadoDestinatario, fecha) VALUES (?,?,?,?,?,?)", salidas)
-    # Total ordenado = stock inicial + todas las entradas registradas.
-    cur.execute("""UPDATE ig SET cantidadOrdenada = ig.cantidadOrdenada + e.total
-                   FROM informeSuministroIngreso ig
-                   JOIN (SELECT codigoUbicacion, codigoSuministro, SUM(cantidad) AS total
-                         FROM entradaSuministro GROUP BY codigoUbicacion, codigoSuministro) e
-                     ON e.codigoUbicacion = ig.codigoUbicacion AND e.codigoSuministro = ig.codigoSuministro""")
+    cur.executemany("INSERT INTO informeSuministroSalida (codigoUbicacionFuente, idSuministro, cantidadDespachada,"
+                    " codigoUbicacionDestino, fecha) VALUES (?,?,?,?,?)", salidas)
 
 
 def main():

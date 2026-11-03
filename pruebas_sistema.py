@@ -96,10 +96,10 @@ def ejecutar(c, db):
     # ═══ 1. BASE DE DATOS ═══════════════════════════════════════════════
     G = "1. Base de datos"
 
-    @prueba(G, "Las 18 tablas existen")
+    @prueba(G, "Las 17 tablas existen")
     def _():
         n = db.escalar("SELECT COUNT(*) FROM sys.tables")
-        assert n == 18, f"hay {n} tablas"
+        assert n == 17, f"hay {n} tablas"
 
     @prueba(G, "Cada tabla tiene al menos un CHECK y un DEFAULT")
     def _():
@@ -129,17 +129,17 @@ def ejecutar(c, db):
     @prueba(G, "Índices agrupados de alta concurrencia creados")
     def _():
         nombres = {f["name"] for f in db.consultar("SELECT name FROM sys.indexes WHERE type_desc = 'CLUSTERED'")}
-        for idx in ("CIX_informeCita_paciente_fecha", "CIX_entradaSuministro_fecha", "CIX_informeSuministroSalida_fecha"):
+        for idx in ("CIX_informeCita_paciente_fecha", "CIX_informeSuministroIngreso_fecha", "CIX_informeSuministroSalida_fecha"):
             assert idx in nombres, f"falta {idx}"
 
     # Diagrama entidad-relación del grupo: tabla -> columnas, y relaciones (hija -> padre).
     DIAGRAMA = {
         "proveedor": ["codigoProveedor", "nombre", "contacto", "telefono", "correo"],
         "suministro": ["codigoSuministro", "nombre", "descripcion", "costoUnitario", "codigoProveedor"],
-        "informeSuministroIngreso": ["codigoUbicacion", "codigoSuministro", "cantidadOrdenada"],
-        "suministroUbicacion": ["codigoUbicacion", "codigoSuministro", "cantidadDisponible"],
+        "informeSuministroIngreso": ["noEntrada", "codigoUbicacion", "idSuministro", "cantidadOrdenada"],
+        "suministroUbicacion": ["codigoUbicacion", "idSuministro", "cantidadDisponible", "cantidadIdeal"],
         "ubicacion": ["codigoUbicacion", "nombre", "empleadoEncargado"],
-        "informeSuministroSalida": ["codigoUbicacionFuente", "codigoSuministro", "cantidadDespachada",
+        "informeSuministroSalida": ["noSalida", "codigoUbicacionFuente", "idSuministro", "cantidadDespachada",
                                     "codigoUbicacionDestino"],
         "especialidad": ["codigoEspecialidad", "nombre"],
         "puesto": ["codigoPuesto", "nombre", "salario"],
@@ -158,8 +158,9 @@ def ejecutar(c, db):
                             "telefonoFam", "medicoRef", "clinicaRef"],
     }
     RELACIONES = [("suministro", "proveedor"), ("informeSuministroIngreso", "suministro"),
-                  ("informeSuministroIngreso", "ubicacion"), ("suministroUbicacion", "informeSuministroIngreso"),
-                  ("informeSuministroSalida", "suministroUbicacion"), ("informeSuministroSalida", "ubicacion"),
+                  ("informeSuministroIngreso", "ubicacion"), ("suministroUbicacion", "ubicacion"),
+                  ("suministroUbicacion", "suministro"), ("informeSuministroSalida", "suministro"),
+                  ("informeSuministroSalida", "ubicacion"),
                   ("ubicacion", "empleado"), ("empleado", "especialidad"), ("empleado", "puesto"),
                   ("empleado", "turno"), ("informeCita", "especialidad"), ("informeCita", "empleado"),
                   ("informeCita", "sala"), ("informeCita", "paciente"), ("asignacionSala", "empleado"),
@@ -354,39 +355,46 @@ def ejecutar(c, db):
         assert any(x["codigoSuministro"] == insumo["cod"] for x in c.get("/api/inventario/critico").get_json())
         return insumo["cod"]
 
-    @prueba(G, "Salida sin empleado destinatario rechazada")
+    @prueba(G, "Traslado sin almacén destino, o al mismo almacén, rechazado")
     def _():
-        s, r = post("/api/inventario/movimientos", {"tipo": "S", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01", "cantidad": 1})
-        assert s == 400 and "empleadoDestinatario" in r.get("campos", {}), r
+        s, r = post("/api/inventario/movimientos", {"tipo": "T", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01", "cantidad": 1})
+        assert s == 400 and "codigoUbicacionDestino" in r.get("campos", {}), r
+        s, r = post("/api/inventario/movimientos", {"tipo": "T", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01",
+                                                    "codigoUbicacionDestino": "U01", "cantidad": 1})
+        assert s == 400 and "codigoUbicacionDestino" in r.get("campos", {}), r
 
     @prueba(G, "Salida mayor al stock rechazada")
     def _():
         s, r = post("/api/inventario/movimientos", {"tipo": "S", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01",
-                                                    "cantidad": 999, "empleadoDestinatario": "A1001"})
+                                                    "cantidad": 999})
         assert s == 400 and "cantidad" in r.get("campos", {}), r
 
-    @prueba(G, "Entrada suma stock y cantidadOrdenada; sale de la alerta al pasar el 15 %")
+    @prueba(G, "Cada entrada es una fila de informeSuministroIngreso; sale de la alerta al pasar el 15 %")
     def _():
         s, r = post("/api/inventario/movimientos", {"tipo": "E", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01", "cantidad": 40})
         assert s == 201, r
-        f = db.consultar_uno("""SELECT sb.cantidadDisponible, ig.cantidadOrdenada FROM suministroUbicacion sb
-                                JOIN informeSuministroIngreso ig ON ig.codigoUbicacion = sb.codigoUbicacion
-                                 AND ig.codigoSuministro = sb.codigoSuministro
-                                WHERE sb.codigoUbicacion = 'U01' AND sb.codigoSuministro = ?""", (insumo["cod"],))
-        assert f["cantidadDisponible"] == 50 and f["cantidadOrdenada"] == 50, f
+        stock = db.escalar("SELECT cantidadDisponible FROM suministroUbicacion"
+                           " WHERE codigoUbicacion = 'U01' AND idSuministro = ?", (insumo["cod"],))
+        entradas = [f["cantidadOrdenada"] for f in db.consultar(
+            "SELECT cantidadOrdenada FROM informeSuministroIngreso WHERE codigoUbicacion = 'U01' AND idSuministro = ?"
+            " ORDER BY noEntrada", (insumo["cod"],))]
+        assert stock == 50 and entradas == [10, 40], (stock, entradas)   # stock inicial + la entrada
         assert not any(x["codigoSuministro"] == insumo["cod"] for x in c.get("/api/inventario/critico").get_json())
 
-    @prueba(G, "Salida a un empleado y traslado entre almacenes")
+    @prueba(G, "Salida (consumo) y traslado entre almacenes, cada uno con su noSalida")
     def _():
         s, r = post("/api/inventario/movimientos", {"tipo": "S", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01",
-                                                    "cantidad": 5, "empleadoDestinatario": "A1001"})
+                                                    "cantidad": 5})
         assert s == 201, r
         s, r = post("/api/inventario/movimientos", {"tipo": "T", "codigoSuministro": insumo["cod"], "codigoUbicacion": "U01",
                                                     "codigoUbicacionDestino": "U02", "cantidad": 5, "cantidadIdeal": 20})
         assert s == 201, r
         stock = {f["codigoUbicacion"]: f["cantidadDisponible"] for f in db.consultar(
-            "SELECT codigoUbicacion, cantidadDisponible FROM suministroUbicacion WHERE codigoSuministro = ?", (insumo["cod"],))}
+            "SELECT codigoUbicacion, cantidadDisponible FROM suministroUbicacion WHERE idSuministro = ?", (insumo["cod"],))}
         assert stock == {"U01": 40, "U02": 5}, stock
+        salidas = db.consultar("SELECT noSalida, codigoUbicacionDestino FROM informeSuministroSalida"
+                               " WHERE idSuministro = ? ORDER BY noSalida", (insumo["cod"],))
+        assert [f["codigoUbicacionDestino"] for f in salidas] == [None, "U02"], salidas
 
     proveedor = {}
 

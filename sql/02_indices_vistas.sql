@@ -30,11 +30,11 @@ GO
 -- traslado) y se consultan por fecha ("movimientos recientes", "consumo semanal").
 -- Agrupar por fecha creciente hace que cada INSERT vaya al final de la tabla
 -- (sin partir páginas a la mitad) y que los reportes por período lean un rango contiguo.
-CREATE CLUSTERED INDEX CIX_entradaSuministro_fecha
-    ON entradaSuministro (fecha, idEntrada);
+CREATE CLUSTERED INDEX CIX_informeSuministroIngreso_fecha
+    ON informeSuministroIngreso (fecha, noEntrada);
 GO
 CREATE CLUSTERED INDEX CIX_informeSuministroSalida_fecha
-    ON informeSuministroSalida (fecha, idSalida);
+    ON informeSuministroSalida (fecha, noSalida);
 GO
 
 /* ---------------------------------------------------------------------
@@ -54,7 +54,7 @@ CREATE NONCLUSTERED INDEX IX_asignacionCama_paciente ON asignacionCama (numeroPa
 GO
 CREATE NONCLUSTERED INDEX IX_suministro_proveedor   ON suministro (codigoProveedor);
 GO
-CREATE NONCLUSTERED INDEX IX_salida_destinatario    ON informeSuministroSalida (empleadoDestinatario);
+CREATE NONCLUSTERED INDEX IX_salida_suministro      ON informeSuministroSalida (idSuministro) INCLUDE (cantidadDespachada);
 GO
 
 /* ---------------------------------------------------------------------
@@ -136,7 +136,7 @@ SELECT
     pr.telefono,
     pr.correo
 FROM suministroUbicacion sb
-JOIN suministro su ON su.codigoSuministro = sb.codigoSuministro
+JOIN suministro su ON su.codigoSuministro = sb.idSuministro
 JOIN ubicacion  u  ON u.codigoUbicacion   = sb.codigoUbicacion
 JOIN proveedor  pr ON pr.codigoProveedor  = su.codigoProveedor
 WHERE sb.cantidadDisponible < 0.15 * sb.cantidadIdeal;

@@ -20,8 +20,8 @@ diseño es: **¿la consulta más frecuente de esta tabla es "buscar por ID" o "l
 ## 2. Cómo se decidió, tabla por tabla
 
 ### Tablas que se buscan por su ID → el agrupado queda en la PK (por defecto)
-`empleado`, `paciente`, `cama`, `asignacionCama`, `registroIngreso`, `suministroUbicacion`,
-`informeSuministroIngreso` y los catálogos. Sus operaciones de alta concurrencia son
+`empleado`, `paciente`, `cama`, `asignacionCama`, `registroIngreso`, `suministroUbicacion`
+y los catálogos. Sus operaciones de alta concurrencia son
 "traer/bloquear **esta** fila" (por ejemplo, `UPDLOCK` sobre una cama o sobre el stock de un insumo
 en una ubicación), y para eso el agrupado por PK es lo óptimo.
 
@@ -33,16 +33,16 @@ en una ubicación), y para eso el agrupado por PK es lo óptimo.
 | Tabla | Índice agrupado | Por qué |
 |---|---|---|
 | `informeCita` | `CIX_informeCita_paciente_fecha (numeroPaciente, fecha, hora)` | La **Query 2** pide todas las citas de un paciente en orden cronológico. Con este orden físico, esas filas están contiguas y ya ordenadas: el motor no busca fila por fila ni ordena después. |
-| `entradaSuministro` | `CIX_entradaSuministro_fecha (fecha, idEntrada)` | Bitácora con inserciones constantes. Al agrupar por fecha creciente, cada INSERT va al final (sin partir páginas a la mitad) y los reportes por período leen un rango. |
-| `informeSuministroSalida` | `CIX_informeSuministroSalida_fecha (fecha, idSalida)` | Igual que la anterior: cada salida o traslado se agrega al final; "movimientos recientes" y "consumo semanal" leen por fecha. |
+| `informeSuministroIngreso` | `CIX_informeSuministroIngreso_fecha (fecha, noEntrada)` | Bitácora de entradas con inserciones constantes. Al agrupar por fecha creciente, cada INSERT va al final (sin partir páginas a la mitad) y los reportes por período leen un rango. |
+| `informeSuministroSalida` | `CIX_informeSuministroSalida_fecha (fecha, noSalida)` | Igual que la anterior: cada salida o traslado se agrega al final; "movimientos recientes" y "consumo semanal" leen por fecha. |
 
 En estas tres tablas la PK se declaró `PRIMARY KEY NONCLUSTERED`, porque el único agrupado
-posible se reservó para el orden de lectura. Se agregó `idEntrada` / `idSalida` al final de la
+posible se reservó para el orden de lectura. Se agregó `noEntrada` / `noSalida` al final de la
 clave para que sea única aunque dos movimientos ocurran en el mismo instante.
 
 ### Índices no agrupados (apoyo a JOIN y filtros)
 `IX_empleado_puesto`, `IX_empleado_especialidad`, `IX_registroIngreso_paciente`, `IX_cama_estado`,
-`IX_asignacionCama_paciente`, `IX_suministro_proveedor`, `IX_salida_destinatario`.
+`IX_asignacionCama_paciente`, `IX_suministro_proveedor`, `IX_salida_suministro`.
 Algunos usan `INCLUDE (...)` para que la consulta encuentre todo en el índice sin volver a la tabla.
 
 Además hay dos **índices únicos filtrados** que son reglas de negocio de RF3:
